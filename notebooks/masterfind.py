@@ -34,37 +34,18 @@ st.title("🎓 Master's Program Advisor AI")
 
 
 # ======================================================
-# 3. Load CSV file
+# 3. Website links to load (no CSV needed)
 # ======================================================
-csv_path = "C:/Users/filip/OneDrive - NOVAIMS/Documents/Github/Capstone_Project/notebooks/institutions_locations.csv"
+MASTER_LINKS = ["https://www.mastersportal.com/search/master/portugal?page=3"]
 
-if not os.path.exists(csv_path):
-    st.error(f"❌ CSV file not found: {csv_path}")
-    st.stop()
-
-# Load only first 2 columns (Institution and GoogleMaps)
-df = pd.read_csv(
-    csv_path,
-    sep=";",
-    engine="python",
-    usecols=[0, 1],
-    names=["Institution", "GoogleMaps"],
-    header=0,
-    on_bad_lines="warn"
-)
-st.write("📄 Loaded CSV with", len(df), "rows.")
+# Show links
+st.subheader("🔗 Loaded Master Page Links")
+for link in MASTER_LINKS:
+    st.write(link)
 
 
 # ======================================================
-# 4. Website links to load
-# ======================================================
-MASTER_LINKS = [
-    "https://eduportugal.eu/cursos-estudo/mestrado/"
-]
-
-
-# ======================================================
-# 5. Extract website knowledge ONCE
+# 4. Extract website knowledge ONCE
 # ======================================================
 if "website_knowledge" not in st.session_state:
     st.session_state.website_knowledge = ""
@@ -73,14 +54,14 @@ if "website_knowledge" not in st.session_state:
         for link in MASTER_LINKS:
 
             query = (
-                f"Extract all Master's programs listed on this page: {link}. "
-                "Include program names, areas, descriptions, and university info."
+                f"Extract all Master's programs listed on this page: {link}. ",
+                "Include program names, university, city."
             )
 
             result = tv.search(
                 query=query,
-                include_raw_content=True,
-                max_results=5
+                include_raw_content=False,
+                max_results=10
             )
 
             raw = "\n\n".join(
@@ -91,34 +72,21 @@ if "website_knowledge" not in st.session_state:
 
 
 # ======================================================
-# 6. Format CSV nicely for AI (preserve Google Maps links)
-# ======================================================
-csv_text = ""
-for _, row in df.iterrows():
-    institution = row["Institution"]
-    maps_link = row["GoogleMaps"] if row["GoogleMaps"] else "No link"
-    csv_text += f"- {institution} | Google Maps: {maps_link}\n"
-
-
-# ======================================================
-# 7. Summarize CSV + website knowledge ONCE
+# 5. Summarize WEBSITE knowledge ONLY
 # ======================================================
 if "combined_summary" not in st.session_state:
 
     with st.spinner("Summarizing all master's program information..."):
         content_to_summarize = (
-            "Here is the CSV dataset containing master's programs and their locations:\n\n"
-            + csv_text
-            + "\n\nHere is website content extracted:\n\n"
+            "Here is website content extracted:\n\n"
             + st.session_state.website_knowledge
         )
 
         summary = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-lite",
             contents=(
                 "Summarize ALL master's program information below into a structured list. "
-                "Include ONLY program name, fields, duration, university, and key notes. "
-                "Keep Google Maps links for each institution. "
+                "Include program name, fields, duration, university, and key notes. "
                 "Ignore ads, menus, and irrelevant content.\n\n"
                 + content_to_summarize
             )
@@ -128,33 +96,31 @@ if "combined_summary" not in st.session_state:
 
 
 # ======================================================
-# 8. Build system instruction for AI — Knowledge base
+# 6. Build system instruction for AI
 # ======================================================
 system_instruction = f"""
 You are a professional Master's degree advisor.
 
-You have access to the following summarized, structured knowledge:
+You have access to the following structured knowledge:
 
 ========================
 {st.session_state.combined_summary}
 ========================
 
 Rules:
-- ALWAYS base your recommendations ONLY on the knowledge above.
--Give like 5 recomendations
-- When recommending a master's program, ALWAYS include in this order:
+- ALWAYS base recommendations only on the knowledge above.
+- Provide 5 recommendations.
+- For each master's program, ALWAYS include in this order:
     1. Program name
     2. Institution
-    3. City
-    4. Google Maps link
-- Do NOT reveal the raw CSV or raw website text unless the user asks explicitly.
-- Provide helpful, personalized advice.
-- Your responses must start with the program name and institution; location and Google Maps link come immediately after.
+    3. City (if available)
+- DO NOT mention Google Maps links.
+- Give clear, helpful, personalized suggestions.
 """
 
 
 # ======================================================
-# 9. Chat initialization
+# 7. Chat initialization
 # ======================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -167,7 +133,7 @@ chat = client.chats.create(
     }
 )
 
-# Replay previous messages
+# Replay conversation
 for m in st.session_state.messages:
     chat.send_message(m["content"])
 
@@ -179,7 +145,7 @@ for m in st.session_state.messages:
 
 
 # ======================================================
-# 10. User Input
+# 8. User Input
 # ======================================================
 if prompt := st.chat_input("Tell me your goals, interests, or preferred study area..."):
 
@@ -201,7 +167,7 @@ if prompt := st.chat_input("Tell me your goals, interests, or preferred study ar
 
 
 # ======================================================
-# 11. Welcome message
+# 9. Welcome message
 # ======================================================
 if len(st.session_state.messages) == 0:
     st.info("""
