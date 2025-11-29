@@ -28,7 +28,7 @@ st.title("🎓 Master's Program Advisor AI")
 # ======================================================
 # 3. Load CSVs
 # ======================================================
-MASTER_CSV_FILE = r"C:\Users\filip\OneDrive - NOVAIMS\Documents\Github\Capstone_Project\notebooks\masters_portugal_all_pages.csv"
+MASTER_CSV_FILE = r"C:\Users\filip\OneDrive - NOVAIMS\Documents\Github\Capstone_Project\notebooks\masters_portugal.csv"
 LOCATION_CSV_FILE = r"C:\Users\filip\OneDrive - NOVAIMS\Documents\Github\Capstone_Project\notebooks\institutions_locations.csv"
 
 try:
@@ -62,7 +62,8 @@ if "website_knowledge" not in st.session_state:
             f"University: {row['University']}\n"
             f"Location: {row['Location']}\n"
             f"Duration: {row['Duration']}\n"
-            f"Tuition: {row['Tuition Fee']}\n\n"
+            f"Tuition: {row['Tuition Fee']}\n"
+            f"About: {row['about']}\n"
         )
 
     # Universities & locations
@@ -94,8 +95,10 @@ Rules:
 - For each master's program, ALWAYS include in this order:
     1. Program name
     2. Institution
-    3. Google Maps link (if available)
+    3. Location (city)
 - Give clear, helpful, personalized suggestions.
+-If they ask for location, use the GoogleMaps links provided.
+- If they ask for more info about a program, give them what is in the knowledge base.
 """
 
 # ======================================================
