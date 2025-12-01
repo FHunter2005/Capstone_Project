@@ -1,6 +1,9 @@
+# ===========================
+# Masters Finder – Chatbot + Calculator
+# ===========================
 import os
 from pathlib import Path
-
+from map_tab import render_university_map  
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -117,8 +120,9 @@ st.markdown(header_html, unsafe_allow_html=True)
 
 
 
-tab_chat, tab_price = st.tabs([" Chat about Masters", "Price Calculator"])
-
+tab_chat, tab_price, tab_map = st.tabs(
+    [" Chat about Masters", "Price Calculator", "Map"]
+)
 # ---------- TAB 1: Chat about Masters ----------
 with tab_chat:
     df = load_data()
@@ -205,3 +209,7 @@ with tab_price:
         c1, c2 = st.columns(2)
         c1.metric("Total cost (€)", f"{total_eur:,.2f}")
         c2.metric("Total cost (local)", f"{total_local:,.2f}")
+    # ---------- TAB 3: Map ----------
+    with tab_map:
+        st.subheader("Universities Map")
+        render_university_map()
