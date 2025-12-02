@@ -1,156 +1,166 @@
+# master_chat_app.py
 import streamlit as st
-import pandas as pd
+from pymongo import MongoClient
+import numpy as np
 from google import genai
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
+import re
 
-# ======================================================
-# 1. Load environment variables
-# ======================================================
+# -----------------------------
+# Load environment variables
+# -----------------------------
 load_dotenv()
 
-GOOGLE_KEY = os.getenv("GOOGLE_API_KEY")
+# -----------------------------
+# MongoDB connection
+# -----------------------------
+MONGO_URI = os.getenv("MONGO_URI")
+MONGO_DB = os.getenv("MONGO_DB")
+client = MongoClient(MONGO_URI)
+db = client[MONGO_DB]
+masters_collection = db.Masters
+maps_collection = db.Maps_Location
 
-if not GOOGLE_KEY:
-    st.error("❌ Missing GOOGLE_API_KEY in .env")
-    st.stop()
+# -----------------------------
+# Google GenAI client
+# -----------------------------
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+ai_client = genai.Client(api_key=GOOGLE_API_KEY)
+EMBED_MODEL = "models/text-embedding-004"
 
-# Initialize Google GenAI client
-client = genai.Client(api_key=GOOGLE_KEY)
-MODEL = "gemini-2.5-flash-lite"
+# -----------------------------
+# Streamlit layout
+# -----------------------------
+st.title("🎓 Master's Programs Finder")
+st.markdown("Ask me about master's programs and I'll find matching programs for you.")
 
-# ======================================================
-# 2. Streamlit Page Setup
-# ======================================================
-st.set_page_config(page_title="Master's Advisor AI", page_icon="🎓")
-st.title("🎓 Master's Program Advisor AI")
-
-# ======================================================
-# 3. Load CSVs
-# ======================================================
-MASTER_CSV_FILE = r"C:\Users\filip\OneDrive - NOVAIMS\Documents\Github\Capstone_Project\notebooks\masters_portugal.csv"
-LOCATION_CSV_FILE = r"C:\Users\filip\OneDrive - NOVAIMS\Documents\Github\Capstone_Project\notebooks\institutions_locations.csv"
-
-try:
-    df_masters = pd.read_csv(MASTER_CSV_FILE)
-except FileNotFoundError:
-    st.error(f"❌ Master CSV not found: {MASTER_CSV_FILE}")
-    st.stop()
-
-try:
-    df_locations = pd.read_csv(
-        LOCATION_CSV_FILE,
-        sep=';',
-        usecols=[0, 1],
-        engine='python',
-        on_bad_lines='skip'
-    )
-    df_locations.columns = ["Institution", "GoogleMaps"]
-except FileNotFoundError:
-    st.error(f"❌ Location CSV not found: {LOCATION_CSV_FILE}")
-    st.stop()
-
-# ======================================================
-# 4. Build structured knowledge for AI
-# ======================================================
-if "website_knowledge" not in st.session_state:
-    # Masters programs
-    masters_knowledge = ""
-    for idx, row in df_masters.iterrows():
-        masters_knowledge += (
-            f"Program: {row['Master Name']}\n"
-            f"University: {row['University']}\n"
-            f"Location: {row['Location']}\n"
-            f"Duration: {row['Duration']}\n"
-            f"Tuition: {row['Tuition Fee']}\n"
-            f"About: {row['about']}\n"
-        )
-
-    # Universities & locations
-    location_knowledge = ""
-    for idx, row in df_locations.iterrows():
-        location_knowledge += f"Institution: {row['Institution']} | GoogleMaps: {row['GoogleMaps']}\n"
-
-    # Combine knowledge
-    st.session_state.website_knowledge = (
-        "Masters Programs:\n" + masters_knowledge + "\n" +
-        "Universities and Locations:\n" + location_knowledge
-    )
-
-# ======================================================
-# 5. Build system instruction for AI
-# ======================================================
-system_instruction = f"""
-You are a professional Master's degree advisor.
-
-You have access to the following structured knowledge:
-
-========================
-{st.session_state.website_knowledge}
-========================
-
-Rules:
-- ALWAYS base recommendations only on the knowledge above.
-- Provide 5 recommendations.
-- For each master's program, ALWAYS include in this order:
-    1. Program name
-    2. Institution
-    3. Location (city)
-- Give clear, helpful, personalized suggestions.
--If they ask for location, use the GoogleMaps links provided.
-- If they ask for more info about a program, give them what is in the knowledge base.
-"""
-
-# ======================================================
-# 6. Initialize chat
-# ======================================================
+# -----------------------------
+# Initialize session state
+# -----------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
+    st.info(
+        "👋 Welcome — ask about your interests and I'll find matching master's programs. "
+        "Data comes from your MongoDB Atlas collection."
+    )
 
-chat = client.chats.create(
-    model=MODEL,
-    config={
-        "system_instruction": system_instruction,
-        "temperature": 0.7
-    }
+# -----------------------------
+# Helper functions
+# -----------------------------
+def generate_embedding(text: str):
+    """Generate embedding for the text using Google GenAI."""
+    resp = ai_client.models.embed_content(
+        model=EMBED_MODEL,
+        contents=[text]
+    )
+    return np.array(resp.embeddings[0].values)
+
+def cosine_similarity(a, b):
+    """Compute cosine similarity safely."""
+    norm_a, norm_b = np.linalg.norm(a), np.linalg.norm(b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return np.dot(a, b) / (norm_a * norm_b)
+
+def ensure_embeddings():
+    """Generate embeddings for all master programs missing them."""
+    for doc in masters_collection.find():
+        if "embedding" not in doc or not doc["embedding"]:
+            text_to_embed = doc.get("about", doc.get("master", ""))
+            if text_to_embed:
+                emb = generate_embedding(text_to_embed)
+                masters_collection.update_one({"_id": doc["_id"]}, {"$set": {"embedding": emb.tolist()}})
+
+def search_master_programs(user_emb, top_k=5):
+    """Find top K masters matching user query embedding."""
+    results = []
+    for doc in masters_collection.find():
+        emb = np.array(doc.get("embedding", []))
+        if emb.size == 0:
+            continue
+        score = cosine_similarity(user_emb, emb)
+        results.append((score, doc))
+    results.sort(key=lambda x: x[0], reverse=True)
+    return [r[1] for r in results[:top_k]]
+
+def get_location_link(university_name):
+    """Get Google Maps link from Maps_Location collection."""
+    doc = maps_collection.find_one({"Institution": {"$regex": f"^{re.escape(university_name)}$", "$options": "i"}})
+    if doc and "GoogleMaps" in doc:
+        return doc["GoogleMaps"]
+    return None
+
+def keyword_fallback_search(query):
+    """Fallback search using keyword match if embeddings fail."""
+    regex = re.compile(re.escape(query), re.IGNORECASE)
+    return list(masters_collection.find({"master": {"$regex": regex}}))[:5]
+
+# -----------------------------
+# Ensure all masters have embeddings
+# -----------------------------
+ensure_embeddings()
+
+# -----------------------------
+# Chat input
+# -----------------------------
+user_input = st.text_input(
+    "Ask me about master's programs or specific details:",
+    placeholder="Tell me your goals, interests, or preferred study area..."
 )
 
-# Replay conversation history
-for m in st.session_state.messages:
-    avatar = "👤" if m["role"] == "user" else "🤖"
-    with st.chat_message(m["role"], avatar=avatar):
-        st.write(m["content"])
+# -----------------------------
+# Chat logic
+# -----------------------------
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
-# ======================================================
-# 7. User input
-# ======================================================
-if prompt := st.chat_input("Tell me your goals, interests, or preferred study area..."):
+    # 1. Check for specific master reference
+    master_names = [m['master'] for m in masters_collection.find()]
+    referenced_master = next(
+        (name for name in master_names if re.search(rf"\b{name}\b", user_input, re.IGNORECASE)), None
+    )
 
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    if referenced_master:
+        doc = masters_collection.find_one({"master": referenced_master})
+        about_text = doc.get("about", "No additional info available.")
+        reply = f"**About {referenced_master}:**\n{about_text}"
 
-    with st.chat_message("user", avatar="👤"):
-        st.write(prompt)
+    else:
+        # 2. General search using embeddings
+        user_emb = generate_embedding(user_input)
+        top_masters = search_master_programs(user_emb, top_k=5)
 
-    with st.chat_message("assistant", avatar="🤖"):
-        with st.spinner("Thinking..."):
-            response = chat.send_message(prompt)
-            reply_text = response.text
+        # 3. Fallback if no embeddings match
+        if not top_masters:
+            top_masters = keyword_fallback_search(user_input)
 
-            st.session_state.messages.append(
-                {"role": "assistant", "content": reply_text}
-            )
+        if not top_masters:
+            reply = "❌ Sorry, no matching master's programs found."
+        else:
+            reply_lines = []
+            for i, doc in enumerate(top_masters, 1):
+                location = doc.get("Location", "Not available")
+                maps_link = get_location_link(doc.get("university", ""))
+                if maps_link:
+                    location = f"[{location}]({maps_link})"
+                reply_lines.append(
+                    f"🔸 Match #{i}\n"
+                    f"🎓 Master: {doc.get('master','Not available')}\n"
+                    f"🏛 University: {doc.get('university','Not available')}\n"
+                    f"📍 Location: {location}\n"
+                    f"⏳ Duration: {doc.get('Duration','Not available')}\n"
+                    f"💰 Tuition Fee: {doc.get('Tuition Fee','Not available')}\n"
+                )
+            reply = "\n".join(reply_lines)
 
-            st.write(reply_text)
+    st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# ======================================================
-# 8. Welcome message
-# ======================================================
-if len(st.session_state.messages) == 0:
-    st.info("""
-    👋 Welcome to your Master's Program Advisor!
 
-    Try asking:
-    • “I like technology and business, what master fits me?”
-    • “Which programs match data science?”
-    • “I want a master's that helps me get a high-paying job.”
-    """)
+# -----------------------------
+# Display chat history
+# -----------------------------
+for msg in st.session_state.messages:
+    role = "user" if msg["role"] == "user" else "assistant"
+    with st.chat_message(role):
+        st.markdown(msg["content"])
