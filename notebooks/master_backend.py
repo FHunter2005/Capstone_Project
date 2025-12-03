@@ -4,7 +4,7 @@ import re
 import numpy as np
 from dotenv import load_dotenv
 from pymongo import MongoClient
-from google import genai
+import google as genai
 
 # ---------- Load env ----------
 load_dotenv()
