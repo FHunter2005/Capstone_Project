@@ -74,14 +74,22 @@ def _search_master_programs(user_emb: np.ndarray, top_k: int = 5):
     return [r[1] for r in results[:top_k]]
 
 
-def _get_location_link(university_name: str):
+def _get_location_link(university_name):
     """Get Google Maps link from Maps_Location by institution name."""
+    if not university_name:
+        return None
+
+    # Garante que é string
+    university_name = str(university_name)
+
     doc = maps_collection.find_one(
         {"Institution": {"$regex": f"^{re.escape(university_name)}$", "$options": "i"}}
     )
+
     if doc and "GoogleMaps" in doc:
         return doc["GoogleMaps"]
     return None
+
 
 
 def _keyword_fallback_search(query: str):
@@ -95,9 +103,13 @@ def _elaborate_answer(master_doc: dict, user_query: str) -> str:
     about_text = master_doc.get("about", "No description available.")
     prompt = (
         f"You are an expert educational advisor. A user asked: '{user_query}'.\n"
-        f"Based on the following program information, provide a detailed, engaging, "
-        f"and natural explanation of why this program might be interesting for the user, "
-        f"what they would learn, and any other helpful insights.\n\n"
+        f"This is ONE of the top 5 recommended master's programs based on semantic similarity.\n"
+        f"Your job is to brifely: \n"
+        f"- Explain clearly why THIS specific program might match the user's interests.\n"
+        f"- Explain what a student learns.\n"
+        f"- Describe possible career paths.\n"
+        f"- Keep the tone professional, concise and helpful.\n\n"
+        f"Program Information:\n"
         f"Master Program: {master_doc.get('master')}\n"
         f"University: {master_doc.get('university')}\n"
         f"Location: {master_doc.get('Location', 'Not available')}\n"
@@ -106,13 +118,14 @@ def _elaborate_answer(master_doc: dict, user_query: str) -> str:
         f"About: {about_text}\n"
     )
 
+
     try:
         response = ai_client.models.generate_content(
             model=LLM_MODEL,
             contents=[prompt],
             config=genai.types.GenerateContentConfig(
                 temperature=0.7,
-                max_output_tokens=400,
+                max_output_tokens=4000,
             ),
         )
         if response.candidates:

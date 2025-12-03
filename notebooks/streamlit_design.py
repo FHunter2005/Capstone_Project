@@ -12,8 +12,10 @@ from calculator import render_price_calculator
 from map_tab import render_university_map
 from master_backend import ensure_embeddings, handle_user_query
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGO_PATH = os.path.join(BASE_DIR, "..", "mm.png")
 # ---------- Layout & session state ----------
-st.set_page_config(page_title="MastersMatch", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="MastersMatch", page_icon=LOGO_PATH, layout="wide")
 
 def init_state():
     ss = st.session_state
@@ -25,8 +27,7 @@ init_state()
 ensure_embeddings()
 
 # ---------- Header with centered logo ----------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "..", "mm.png")
+
 with open(LOGO_PATH, "rb") as f:
     logo_base64 = base64.b64encode(f.read()).decode()
 
