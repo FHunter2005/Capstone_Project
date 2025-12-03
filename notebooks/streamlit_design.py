@@ -4,6 +4,7 @@
 # ===========================
 import base64
 from pathlib import Path
+import os
 
 import streamlit as st
 
@@ -24,7 +25,8 @@ init_state()
 ensure_embeddings()
 
 # ---------- Header with centered logo ----------
-LOGO_PATH = Path(__file__).parent / "..\mm.png"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGO_PATH = os.path.join(BASE_DIR, "..", "mm.png")
 with open(LOGO_PATH, "rb") as f:
     logo_base64 = base64.b64encode(f.read()).decode()
 
