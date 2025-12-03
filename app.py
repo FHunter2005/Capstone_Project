@@ -26,7 +26,7 @@ master_service = init_services()
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "..", "mm.png")
+LOGO_PATH = os.path.join(BASE_DIR, "mm.png")
 with open(LOGO_PATH, "rb") as f:
     logo_base64 = base64.b64encode(f.read()).decode()
 
