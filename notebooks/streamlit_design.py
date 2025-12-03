@@ -24,7 +24,7 @@ init_state()
 ensure_embeddings()
 
 # ---------- Header with centered logo ----------
-LOGO_PATH = Path(__file__).parent / "Maste Match (2).png"
+LOGO_PATH = Path(__file__).parent / "..\mm.png"
 with open(LOGO_PATH, "rb") as f:
     logo_base64 = base64.b64encode(f.read()).decode()
 
