@@ -1,99 +1,97 @@
-# master_chat_app.py
-import streamlit as st
-from pymongo import MongoClient
-import numpy as np
-from google import genai
+# master_backend.py
 import os
-from dotenv import load_dotenv
 import re
-from google.genai import types
+import numpy as np
+from dotenv import load_dotenv
+from pymongo import MongoClient
+from google import genai
 
-# -----------------------------
-# Load environment variables
-# -----------------------------
+# ---------- Load env ----------
 load_dotenv()
 
-# -----------------------------
-# MongoDB connection
-# -----------------------------
+GOOGLE_KEY = os.getenv("GOOGLE_API_KEY")
 MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB = os.getenv("MONGO_DB")
-client = MongoClient(MONGO_URI)
-db = client[MONGO_DB]
+
+if not GOOGLE_KEY:
+    raise RuntimeError("Missing GOOGLE_API_KEY in .env")
+if not MONGO_URI or not MONGO_DB:
+    raise RuntimeError("Missing MONGO_URI or MONGO_DB in .env")
+
+# ---------- Gemini client & models ----------
+ai_client = genai.Client(api_key=GOOGLE_KEY)
+EMBED_MODEL = "models/text-embedding-004"
+LLM_MODEL = "gemini-2.0-flash"   # good free-tier choice
+
+# ---------- MongoDB ----------
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client[MONGO_DB]
 masters_collection = db.Masters
 maps_collection = db.Maps_Location
 
-# -----------------------------
-# Google GenAI client
-# -----------------------------
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-ai_client = genai.Client(api_key=GOOGLE_API_KEY)
-EMBED_MODEL = "models/text-embedding-004"
-LLM_MODEL = "gemini-2.5-flash"  # or another available model
 
-# -----------------------------
-# Streamlit layout
-# -----------------------------
-st.title("🎓 Master's Programs Finder")
-st.markdown("Ask me about master's programs and I'll find matching programs for you.")
-
-# -----------------------------
-# Initialize session state
-# -----------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.info(
-        "👋 Welcome — ask about your interests and I'll find matching master's programs. "
-        "Data comes from your MongoDB Atlas collection."
-    )
-
-# -----------------------------
-# Helper functions
-# -----------------------------
-def generate_embedding(text: str):
+# ---------- Embedding helpers ----------
+def _generate_embedding(text: str) -> np.ndarray:
     resp = ai_client.models.embed_content(
         model=EMBED_MODEL,
-        contents=[text]
+        contents=[text],
     )
-    return np.array(resp.embeddings[0].values)
+    return np.array(resp.embeddings[0].values, dtype=float)
 
-def cosine_similarity(a, b):
+
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     norm_a, norm_b = np.linalg.norm(a), np.linalg.norm(b)
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    return np.dot(a, b) / (norm_a * norm_b)
+    return float(np.dot(a, b) / (norm_a * norm_b))
+
 
 def ensure_embeddings():
+    """Ensure each master document in Mongo has an 'embedding' field."""
     for doc in masters_collection.find():
         if "embedding" not in doc or not doc["embedding"]:
             text_to_embed = doc.get("about", doc.get("master", ""))
-            if text_to_embed:
-                emb = generate_embedding(text_to_embed)
-                masters_collection.update_one({"_id": doc["_id"]}, {"$set": {"embedding": emb.tolist()}})
+            if not text_to_embed:
+                continue
+            emb = _generate_embedding(text_to_embed)
+            masters_collection.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"embedding": emb.tolist()}},
+            )
 
-def search_master_programs(user_emb, top_k=5):
+
+def _search_master_programs(user_emb: np.ndarray, top_k: int = 5):
+    """Return top_k Mongo docs most similar to user_emb."""
     results = []
     for doc in masters_collection.find():
-        emb = np.array(doc.get("embedding", []))
+        emb_list = doc.get("embedding", [])
+        emb = np.array(emb_list, dtype=float)
         if emb.size == 0:
             continue
-        score = cosine_similarity(user_emb, emb)
+        score = _cosine_similarity(user_emb, emb)
         results.append((score, doc))
     results.sort(key=lambda x: x[0], reverse=True)
     return [r[1] for r in results[:top_k]]
 
-def get_location_link(university_name):
-    doc = maps_collection.find_one({"Institution": {"$regex": f"^{re.escape(university_name)}$", "$options": "i"}})
+
+def _get_location_link(university_name: str):
+    """Get Google Maps link from Maps_Location by institution name."""
+    doc = maps_collection.find_one(
+        {"Institution": {"$regex": f"^{re.escape(university_name)}$", "$options": "i"}}
+    )
     if doc and "GoogleMaps" in doc:
         return doc["GoogleMaps"]
     return None
 
-def keyword_fallback_search(query):
+
+def _keyword_fallback_search(query: str):
+    """Simple regex search over master name if embeddings fail."""
     regex = re.compile(re.escape(query), re.IGNORECASE)
     return list(masters_collection.find({"master": {"$regex": regex}}))[:5]
 
-def elaborate_answer(master_doc, user_query):
-    """Use AI to generate a fluent and elaborated answer about a master program."""
+
+def _elaborate_answer(master_doc: dict, user_query: str) -> str:
+    """Use Gemini to generate a detailed explanation about a master program."""
     about_text = master_doc.get("about", "No description available.")
     prompt = (
         f"You are an expert educational advisor. A user asked: '{user_query}'.\n"
@@ -107,86 +105,77 @@ def elaborate_answer(master_doc, user_query):
         f"Tuition Fee: {master_doc.get('Tuition Fee', 'Not available')}\n"
         f"About: {about_text}\n"
     )
-    response = ai_client.models.generate_content(
-        model=LLM_MODEL,
-        contents=[prompt],
-        config=types.GenerateContentConfig(
-            temperature=0.7,
-            max_output_tokens=400
+
+    try:
+        response = ai_client.models.generate_content(
+            model=LLM_MODEL,
+            contents=[prompt],
+            config=genai.types.GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=400,
+            ),
         )
-    )
-    # SDK returns a list of items in `response.candidates`
-    if hasattr(response, "candidates") and response.candidates:
-        return response.candidates[0].content
-    else:
-        return "No elaborated text available."
+        if response.candidates:
+            parts = response.candidates[0].content.parts
+            text = "".join(getattr(p, "text", "") for p in parts)
+            return text.strip() or "No elaborated text available."
+    except Exception as e:
+        return f"(Could not generate detailed explanation: {e})"
+
+    return "No elaborated text available."
 
 
-# -----------------------------
-# Ensure all masters have embeddings
-# -----------------------------
-ensure_embeddings()
-
-# -----------------------------
-# Chat input
-# -----------------------------
-user_input = st.text_input(
-    "Ask me about master's programs or specific details:",
-    placeholder="Tell me your goals, interests, or preferred study area..."
-)
-
-# -----------------------------
-# Chat logic
-# -----------------------------
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    # Check for a specific master reference
-    master_names = [m['master'] for m in masters_collection.find()]
+def handle_user_query(user_input: str) -> str:
+    """
+    Public API for the app:
+    Given a user query, returns a markdown string with recommended programs + explanations.
+    """
+    # 1) Direct reference by master name?
+    master_names = [m.get("master", "") for m in masters_collection.find()]
     referenced_master = next(
-        (name for name in master_names if re.search(rf"\b{name}\b", user_input, re.IGNORECASE)), None
+        (name for name in master_names if name and re.search(rf"\b{name}\b", user_input, re.IGNORECASE)),
+        None,
     )
 
     if referenced_master:
         doc = masters_collection.find_one({"master": referenced_master})
-        reply = elaborate_answer(doc, user_input)
+        if not doc:
+            return "I couldn't find detailed information about that specific master."
+        return _elaborate_answer(doc, user_input)
 
-    else:
-        # General search using embeddings
-        user_emb = generate_embedding(user_input)
-        top_masters = search_master_programs(user_emb, top_k=5)
+    # 2) Otherwise: semantic search
+    try:
+        user_emb = _generate_embedding(user_input)
+    except Exception as e:
+        return f"❌ Error while generating embedding: {e}"
 
-        # Fallback if no embeddings match
-        if not top_masters:
-            top_masters = keyword_fallback_search(user_input)
+    top_masters = _search_master_programs(user_emb, top_k=5)
 
-        if not top_masters:
-            reply = "❌ Sorry, no matching master's programs found."
-        else:
-            reply_lines = []
-            for i, doc in enumerate(top_masters, 1):
-                location = doc.get("Location", "Not available")
-                maps_link = get_location_link(doc.get("university", ""))
-                if maps_link:
-                    location = f"[{location}]({maps_link})"
-                elaborated_text = elaborate_answer(doc, user_input)
-                reply_lines.append(
-                    f"🔸 Match #{i}\n"
-                    f"🎓 Master: {doc.get('master','Not available')}\n"
-                    f"🏛 University: {doc.get('university','Not available')}\n"
-                    f"📍 Location: {location}\n"
-                    f"⏳ Duration: {doc.get('Duration','Not available')}\n"
-                    f"💰 Tuition Fee: {doc.get('Tuition Fee','Not available')}\n\n"
-                    f"{elaborated_text}\n"
-                )
-            reply = "\n".join(reply_lines)
+    # 3) Fallback if nothing found
+    if not top_masters:
+        top_masters = _keyword_fallback_search(user_input)
 
-    st.session_state.messages.append({"role": "assistant", "content": reply})
+    if not top_masters:
+        return "❌ Sorry, no matching master's programs found."
 
-# -----------------------------
-# Display chat history
-# -----------------------------
-for msg in st.session_state.messages:
-    role = "user" if msg["role"] == "user" else "assistant"
-    with st.chat_message(role):
-        st.markdown(msg["content"])
+    # 4) Build markdown answer with multiple matches
+    reply_lines = []
+    for i, doc in enumerate(top_masters, 1):
+        location = doc.get("Location", "Not available")
+        maps_link = _get_location_link(doc.get("university", ""))
+        if maps_link:
+            location = f"[{location}]({maps_link})"
+
+        elaborated_text = _elaborate_answer(doc, user_input)
+
+        reply_lines.append(
+            f"🔸 **Match #{i}**\n"
+            f"🎓 **Master:** {doc.get('master', 'Not available')}\n"
+            f"🏛 **University:** {doc.get('university', 'Not available')}\n"
+            f"📍 **Location:** {location}\n"
+            f"⏳ **Duration:** {doc.get('Duration', 'Not available')}\n"
+            f"💰 **Tuition Fee:** {doc.get('Tuition Fee', 'Not available')}\n\n"
+            f"{elaborated_text}\n"
+        )
+
+    return "\n".join(reply_lines)
