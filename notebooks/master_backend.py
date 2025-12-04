@@ -9,6 +9,7 @@ from streamlit_lottie import st_lottie
 import requests
 import streamlit as st
 import time
+import json
 
 # ---------- Load env ----------
 load_dotenv()
@@ -34,18 +35,26 @@ masters_collection = db.Masters
 maps_collection = db.Maps_Location
 
 
-def play_lottie_intro(url: str, height: int = 400, duration: float = 3.0):
-    """Play a Lottie animation from URL, then remove it."""
+def play_lottie_intro(json_path: str, height: int = 300, duration: float = 3.0):
+    # If animation already played in this session → do nothing
+    if st.session_state.get("intro_played", False):
+        return
+
+    # Mark it as played
+    st.session_state["intro_played"] = True
+
+    # Load JSON
     try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        animation = r.json()
+        with open(json_path, "r") as f:
+            animation = json.load(f)
     except Exception as e:
         st.error(f"Could not load Lottie animation: {e}")
         return
 
     placeholder = st.empty()
-    placeholder.st_lottie(animation, height=height, loop=False)
+    with placeholder:
+        st_lottie(animation, height=height, loop=False)
+
     time.sleep(duration)
     placeholder.empty()
 

@@ -68,4 +68,4 @@ def render_university_map():
     ).add_to(m)
 
     # Render Folium map in Streamlit
-    st_folium(m, width=700, height=500)
+    st_folium(m, width=1200, height=500)

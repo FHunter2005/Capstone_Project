@@ -14,7 +14,7 @@ from master_backend import ensure_embeddings, handle_user_query,  play_lottie_in
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "..", "mm.png")
-LOTTIE_URL = "https://lottie.host/4245dfee-8231-4468-94e8-4f541f60bd9e/4jvv5bSobM.lottie"
+LOTTIE_PATH = os.path.join(BASE_DIR, "..", "gif.json")
 # ---------- Layout & session state ----------
 st.set_page_config(page_title="MastersMatch", page_icon=LOGO_PATH, layout="wide")
 
@@ -28,7 +28,7 @@ init_state()
 ensure_embeddings()
 
 # ---------- Header with centered logo ----------
-play_lottie_intro(LOTTIE_URL, height=300, duration=3.0)
+play_lottie_intro(LOTTIE_PATH, height=200, duration=4.0)
 with open(LOGO_PATH, "rb") as f:
     logo_base64 = base64.b64encode(f.read()).decode()
 
