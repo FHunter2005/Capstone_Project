@@ -30,6 +30,8 @@ class AIClient:
                 max_output_tokens=400,
             )
         )
-        print("DEBUG AI RESPONSE response:", response)
-        return response.get("text", "")
+        try:
+            return response.text.strip()
+        except Exception:
+            return ""
 

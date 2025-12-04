@@ -85,7 +85,7 @@ f"""🔸 **Match #{i}**
 🏛 **University:** {r.get('university', 'Not available')}
 📍 **Location:** {r.get('location', 'Not available')}
 ⏳ **Duration:** {r.get('duration', 'Not available')}
-💰 **Tuition Fee:** {r.get('tuition', 'Not available')}
+💰 **Tuition Fee:** {r.get('tuition_fee', 'Not available')}
 
 {r.get('elaborated', '')}
 """

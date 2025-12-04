@@ -89,22 +89,34 @@ class MasterService:
         prompt = elaboration_prompt(master_doc, user_query)
         try:
             response = self.ai.generate(prompt)
-            return response.text or "No elaborated text available."
+            return response.strip() or "No elaborated text available."
         except Exception as e:
             return f"(Could not generate elaboration: {e})"
+
     
     def _enrich_master(self, master_doc: dict, user_query: str) -> dict:
         enriched = master_doc.copy()
-        print("DEBUG DOCUMENT master_doc:", master_doc)
-        enriched["location"] = master_doc.get("Location")
-        enriched["tuition_fee"] = master_doc.get("Tuition Fee")
-        enriched["duration"] = master_doc.get("Duration")
-        # Generate elaborated answer
-        enriched["elaborated_text"] = self.elaborate_answer(master_doc, user_query)
-        print("DEBUG DOCUMENT enriched:", enriched)
 
-    
+        def safe(value):
+            if value is None:
+                return "Not available"
+            if isinstance(value, float) and value != value:  # NaN
+                return "Not available"
+            if value == "":
+                return "Not available"
+            return value
+
+        enriched["location"]     = safe(master_doc.get("Location"))
+        enriched["duration"]     = safe(master_doc.get("Duration"))
+        enriched["tuition_fee"]  = safe(master_doc.get("Tuition Fee"))
+        enriched["about"]        = safe(master_doc.get("about"))
+
+        enriched["elaborated"] = self.elaborate_answer(master_doc, user_query)
+
         return enriched
+
+
+
 
 
     def handle_query(self, user_input: str) -> list[dict]:
