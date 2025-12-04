@@ -5,6 +5,10 @@ import numpy as np
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from google import genai
+from streamlit_lottie import st_lottie
+import requests
+import streamlit as st
+import time
 
 # ---------- Load env ----------
 load_dotenv()
@@ -28,6 +32,22 @@ mongo_client = MongoClient(MONGO_URI)
 db = mongo_client[MONGO_DB]
 masters_collection = db.Masters
 maps_collection = db.Maps_Location
+
+
+def play_lottie_intro(url: str, height: int = 400, duration: float = 3.0):
+    """Play a Lottie animation from URL, then remove it."""
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        animation = r.json()
+    except Exception as e:
+        st.error(f"Could not load Lottie animation: {e}")
+        return
+
+    placeholder = st.empty()
+    placeholder.st_lottie(animation, height=height, loop=False)
+    time.sleep(duration)
+    placeholder.empty()
 
 
 # ---------- Embedding helpers ----------
