@@ -95,9 +95,14 @@ class MasterService:
     
     def _enrich_master(self, master_doc: dict, user_query: str) -> dict:
         enriched = master_doc.copy()
-    
+        print("DEBUG DOCUMENT master_doc:", master_doc)
+        enriched["location"] = master_doc.get("Location")
+        enriched["tuition_fee"] = master_doc.get("Tuition Fee")
+        enriched["duration"] = master_doc.get("Duration")
         # Generate elaborated answer
         enriched["elaborated_text"] = self.elaborate_answer(master_doc, user_query)
+        print("DEBUG DOCUMENT enriched:", enriched)
+
     
         return enriched
 
@@ -122,3 +127,4 @@ class MasterService:
 
         # 4. Enrich all results
         return [self._enrich_master(doc, user_input) for doc in matches]
+    
