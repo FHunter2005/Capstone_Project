@@ -94,10 +94,29 @@ def _elaborate_answer(master_doc: dict, user_query: str) -> str:
     """Use Gemini to generate a detailed explanation about a master program."""
     about_text = master_doc.get("about", "No description available.")
     prompt = (
-        f"You are an expert educational advisor. A user asked: '{user_query}'.\n"
-        f"Based on the following program information, provide a detailed, engaging, "
-        f"and natural explanation of why this program might be interesting for the user, "
-        f"what they would learn, and any other helpful insights.\n\n"
+        f"You are an educational advisor. The user asked: '{user_query}'.\n\n"
+        
+        f"You will receive information about ONE master's program from a dataset that "
+        f"ONLY contains master's programs from PORTUGAL.\n"
+        
+        f"⚠️ RULES YOU MUST FOLLOW STRICTLY:\n"
+        f"- Only describe the program shown below.\n"
+        f"- Do NOT create, imagine, or reference any university or master's program "
+        f"outside Portugal.\n"
+        f"- Do NOT recommend additional programs.\n"
+        f"- Do NOT mention international rankings, comparisons, or foreign alternatives.\n"
+        f"- Your entire answer must be ONLY about the program provided below.\n\n"
+        
+        f"Format your answer EXACTLY like this:\n"
+        f"- **Master Program**: (name)\n"
+        f"- **University**: (name)\n"
+        f"- **Location**: (city or region in Portugal)\n"
+        f"- **Tuition Fee**: (value)\n"
+        f"- **Why it could be a good fit**: 1-2 short sentences\n"
+        f"- **Ideal for students who**: 1 short sentence\n"
+        f"- **What makes it special**: 1 short sentence\n\n"
+        
+        f"--- Program Information ---\n"
         f"Master Program: {master_doc.get('master')}\n"
         f"University: {master_doc.get('university')}\n"
         f"Location: {master_doc.get('Location', 'Not available')}\n"
@@ -106,13 +125,16 @@ def _elaborate_answer(master_doc: dict, user_query: str) -> str:
         f"About: {about_text}\n"
     )
 
+
+
+
     try:
         response = ai_client.models.generate_content(
             model=LLM_MODEL,
             contents=[prompt],
             config=genai.types.GenerateContentConfig(
                 temperature=0.7,
-                max_output_tokens=400,
+                max_output_tokens=10000,
             ),
         )
         if response.candidates:
