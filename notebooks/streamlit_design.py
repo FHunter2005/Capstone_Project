@@ -10,7 +10,7 @@ import streamlit as st
 
 from calculator import render_price_calculator
 from map_tab import render_university_map
-from master_backend import ensure_embeddings, handle_user_query,  play_lottie_intro
+from testing import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "..", "mm.png")
@@ -25,7 +25,7 @@ def init_state():
 init_state()
 
 # ---------- One-time backend init ----------
-ensure_embeddings()
+#ensure_embeddings()
 
 # ---------- Header with centered logo ----------
 play_lottie_intro(LOTTIE_PATH, height=200, duration=4.0)
