@@ -1,5 +1,7 @@
+# services/db_service.py
 from pymongo import MongoClient
 from utils.config import Config
+
 
 class DatabaseService:
     def __init__(self):
@@ -7,7 +9,7 @@ class DatabaseService:
         self.db = self.client[Config.MONGO_DB]
 
     def masters(self):
-        return self.db.Masters
+        return self.db["Masters"]
 
-    def locations(self):
-        return self.db.Maps_Location
+    def maps_location(self):
+        return self.db["Maps_Location"]
