@@ -8,14 +8,14 @@ from pathlib import Path
 import os
 import streamlit as st
 
-from Project.calculator import render_price_calculator
-from Project.map_tab import render_university_map
-from testing import *
+from calculator import render_price_calculator
+from map_tab import render_university_map
+import requests
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "..", "mm.png")
-LOTTIE_PATH = os.path.join(BASE_DIR, "..", "gif.json")
-Side_PATH = os.path.join(BASE_DIR, "..", "photo.jpg")
+LOGO_PATH = os.path.join(BASE_DIR, "mm.png")
+LOTTIE_PATH = os.path.join(BASE_DIR, "gif.json")
+Side_PATH = os.path.join(BASE_DIR,"photo.jpg")
 
  # lottie animation JSON
 
@@ -40,6 +40,28 @@ def init_state():
 
 init_state()
 
+import json
+import time
+from streamlit_lottie import st_lottie
+
+def play_lottie_intro(json_path: str, height: int = 300, duration: float = 3.0):
+    if st.session_state.get("intro_played", False):
+        return
+    st.session_state["intro_played"] = True
+
+    try:
+        with open(json_path, "r") as f:
+            animation = json.load(f)
+    except Exception as e:
+        st.error(f"Could not load Lottie animation: {e}")
+        return
+
+    placeholder = st.empty()
+    with placeholder:
+        st_lottie(animation, height=height, loop=False)
+
+    time.sleep(duration)
+    placeholder.empty()
 
 
 play_lottie_intro(LOTTIE_PATH, height=200, duration=4.0)
@@ -192,7 +214,14 @@ if selected == "chat":
         # Assistant reply
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = handle_user_query(prompt)
+                api_url = "http://localhost:8000/query"
+                payload = {"query": prompt}
+
+                try:
+                    api_response = requests.post(api_url, json=payload).json()
+                    response = api_response.get("result", "❌ API returned no result.")
+                except Exception as e:
+                    response = f"❌ Error contacting backend API: {e}"
             st.markdown(response)
 
         st.session_state.messages.append({"role": "assistant", "content": response})
