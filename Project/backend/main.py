@@ -1,6 +1,10 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from services.query_engine import QueryEngine
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 app = FastAPI(
     title="MastersMatch API",
