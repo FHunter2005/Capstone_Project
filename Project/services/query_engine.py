@@ -48,30 +48,50 @@ class QueryEngine:
     # ---------------------------- SEMANTIC SEARCH ----------------------------
 
     def _semantic_search(self, user_input: str, top_k: int = 5) -> List[Dict]:
-        user_emb = self.embedding_service.generate_embedding(user_input)
-        scored = self.embedding_service.search_similar(user_emb, top_k=top_k)  
-        # scored = [(score, doc), ...]
+        """
+        Semantic search with dynamic thresholding:
+        - Adjusts similarity threshold based on query length and top score.
+        - Returns up to top_k results that meet the dynamic threshold.
+        """
 
+        # 1) Generate embedding
+        user_emb = self.embedding_service.generate_embedding(user_input)
+
+        # 2) Perform similarity search → list of (score, doc)
+        scored = self.embedding_service.search_similar(user_emb, top_k=top_k)
         if not scored:
             return []
 
-        # Sort again just in case
+        # Sort descending
         scored.sort(key=lambda x: x[0], reverse=True)
 
-        MIN_ABS_SCORE = 0.55        # absolute threshold
-        DROP_RATIO = 0.70           # relative threshold compared to best score
-
+        # 3) Extract clarity signals
+        word_count = len(user_input.split())
         top_score = scored[0][0]
-        filtered = []
 
-        for score, doc in scored:
-            if score < MIN_ABS_SCORE:
-                break
-            if score < top_score * DROP_RATIO:
-                break
-            filtered.append(doc)
+        # 4) Start with a base threshold
+        threshold = 0.60
 
-        return filtered
+        # Adjust based on length of query
+        if word_count <= 2:
+            threshold -= 0.10       # vague query → lower threshold
+        elif word_count >= 8:
+            threshold += 0.05       # very specific → raise threshold
+
+        # Adjust based on semantic strength (top similarity)
+        if top_score >= 0.85:
+            threshold += 0.05       # strong signal → stricter
+        elif top_score <= 0.55:
+            threshold -= 0.10       # weak signal → more lenient
+
+        # Clamp between 0.45 and 0.75
+        threshold = max(0.45, min(threshold, 0.75))
+
+        # 5) Filter based on dynamic threshold
+        filtered = [doc for score, doc in scored if score >= threshold]
+
+        # 6) Return up to top_k
+        return filtered[:top_k]
 
     # ---------------------------- MAIN PIPELINE ----------------------------
 
