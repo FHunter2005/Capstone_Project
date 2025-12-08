@@ -9,20 +9,20 @@ import os
 import streamlit as st
 
 from calculator import render_price_calculator
-from map_tab import render_university_map
+from Project.map_tab import render_university_map
 import requests
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "mm.png")
+LOGO_PATH = os.path.join(BASE_DIR, "mm.jpg")
 LOTTIE_PATH = os.path.join(BASE_DIR, "gif.json")
-Side_PATH = os.path.join(BASE_DIR,"photo.jpg")
+SIDE_PATH = os.path.join(BASE_DIR,"photo.jpg")
 
  # lottie animation JSON
 
 
 # ---------- Page Config ----------
 st.set_page_config(
-    page_title="MastersMatch",
+    page_title="MasterMatch",
     page_icon=str(LOGO_PATH),
     layout="wide",
     initial_sidebar_state="expanded",
@@ -44,7 +44,13 @@ import json
 import time
 from streamlit_lottie import st_lottie
 
-def play_lottie_intro(json_path: str, height: int = 300, duration: float = 3.0):
+# ---------- Encode Assets ----------
+def load_image_base64(path: Path) -> str:
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+# ---------- Play Lottie Intro ----------
+def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, duration: int = 6):
     if st.session_state.get("intro_played", False):
         return
     st.session_state["intro_played"] = True
@@ -56,26 +62,38 @@ def play_lottie_intro(json_path: str, height: int = 300, duration: float = 3.0):
         st.error(f"Could not load Lottie animation: {e}")
         return
 
-    placeholder = st.empty()
-    with placeholder:
-        st_lottie(animation, height=height, loop=False)
+    # Container for GIF
+    container = st.empty()
 
-    time.sleep(duration)
-    placeholder.empty()
+    # CSS for rounded corners
+    st.markdown(
+        """
+        <style>
+        .stLottie iframe {
+            border-radius: 20px !important;
+            overflow: hidden !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with container:
+        st_lottie(animation, height=height, key="intro_lottie")
+
+    # Wait before showing main content
+    time.sleep(duration)  # or your desired duration
+    container.empty()  # removes intro GIF after duration
 
 
-play_lottie_intro(LOTTIE_PATH, height=200, duration=4.0)
-with open(LOGO_PATH, "rb") as f:
-    logo_base64 = base64.b64encode(f.read()).decode()
-
-# ---------- Encode Assets ----------
-def load_image_base64(path: Path) -> str:
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
 
 
+# ---------- Load Assets ----------
 logo_base64 = load_image_base64(LOGO_PATH)
-sidebar_bg_base64 = load_image_base64(Side_PATH)
+sidebar_bg_base64 = load_image_base64(SIDE_PATH)
+
+# ---------- Show Lottie Intro ----------
+play_lottie_intro(LOTTIE_PATH, height=300, width=300, duration=6)
 
 
 st.markdown(
@@ -150,7 +168,7 @@ header_html = f"""
         margin-top: 20px;
         font-weight: 700;
         font-size: 48px;
-    ">MastersMatch</h1>
+    ">MasterMatch</h1>
     <p style="
         font-size: 20px;
         color: lightgray;

@@ -1,55 +1,71 @@
-# map_tab.py
+import re
+import folium
 import streamlit as st
 import pandas as pd
-import pydeck as pdk
+from pymongo import MongoClient
+import os
+from dotenv import load_dotenv
+from streamlit_folium import st_folium   # <-- Correct import
+
+# ---------- Load env ----------
+load_dotenv()
+
+MONGO_URI = os.getenv("MONGO_URI")
+MONGO_DB = os.getenv("MONGO_DB")
+mongo_client = MongoClient(MONGO_URI)
+db = mongo_client[MONGO_DB]
+maps_collection = db.Maps_Location
+
+if not MONGO_URI or not MONGO_DB:
+    raise RuntimeError("Missing MONGO_URI or MONGO_DB in .env")
 
 def render_university_map():
-    # Dictionary of universities with coordinates
-    university = {
-        "Nova IMS": [38.73267651987515, -9.159958418944454],
-        "Nova FCSH": [38.74081811181073, -9.15071327661429],
-        "Nova FCT": [38.66126138110339, -9.205365003607264],
-        "Universidade do Porto": [41.15968610535622, -8.625068575893907],
-    }
+    # Load universities from MongoDB
+    df_maps = pd.DataFrame(list(maps_collection.find()))
+    university = dict(zip(df_maps["Institution"], df_maps["GoogleMaps"]))
 
     st.subheader("Interactive City Map")
 
-    # University selector
+    # Select a university
     selected_university = st.selectbox("Select a University", list(university.keys()))
+    url = university[selected_university]
 
-    # Get coordinates
-    coords = university[selected_university]
+    # Extract coordinates
+    def coords_from_google_maps(url):
+        if pd.isna(url) or url.strip() == "":
+            return None
+        
+        match_at = re.search(r'@([-0-9.]+),([-0-9.]+)', url)
+        if match_at:
+            return float(match_at.group(1)), float(match_at.group(2))
 
-    # DataFrame for map
-    df = pd.DataFrame({
-        'lat': [coords[0]],
-        'lon': [coords[1]],
-        'name': [selected_university]
-    })
+        match_loc = re.search(r'loc:([-0-9.]+)\+([-0-9.]+)', url)
+        if match_loc:
+            return float(match_loc.group(1)), float(match_loc.group(2))
 
-    # Create PyDeck layer with smaller markers
-    layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=df,
-        get_position='[lon, lat]',
-        get_color='[255, 0, 0, 160]',
-        get_radius=50,
-        pickable=True,
-    )
+        return None
 
-    # Set view state
-    view_state = pdk.ViewState(
-        latitude=coords[0],
-        longitude=coords[1],
-        zoom=13.5,
-        pitch=0,
-    )
+    coords = coords_from_google_maps(url)
 
-    # Render map
-    st.pydeck_chart(
-        pdk.Deck(
-            layers=[layer],
-            initial_view_state=view_state,
-            tooltip={"text": "{name}"}
-        )
-    )
+    if coords is None:
+        st.error(f"⚠️ Could not extract coordinates from Google Maps link for: {selected_university}")
+        return
+
+    lat, lon = coords
+
+    # ---------------------------
+    #        FOLIUM MAP
+    # ---------------------------
+
+    m = folium.Map(location=[lat, lon], zoom_start=14)
+
+    # Marker with popup
+    folium.Marker(
+        location=[lat, lon],
+        popup=selected_university,
+        tooltip=selected_university,
+        icon=folium.Icon(color="red")
+    ).add_to(m)
+
+    # Render Folium map in Streamlit
+    st_folium(m, width=1200, height=500)
