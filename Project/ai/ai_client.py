@@ -24,7 +24,7 @@ class AIClient:
             prompt,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.7,
-                max_output_tokens=1500,
+                max_output_tokens=10000,
             )
         )
         try:
