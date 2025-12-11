@@ -13,3 +13,9 @@ class DatabaseService:
 
     def maps_location(self):
         return self.db["Maps_Location"]
+    
+    def users(self):
+        return self.db["users"]
+
+    def chat_logs(self):
+        return self.db["chat_logs"]

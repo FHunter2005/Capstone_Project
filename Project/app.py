@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 import streamlit as st
 
+from services.auth_service import AuthService
 from calculator import render_price_calculator
 from Project.map_tab import render_university_map
 import requests
@@ -35,10 +36,15 @@ def init_state():
         st.session_state.messages = []
     if "page" not in st.session_state:
         st.session_state.page = "chat"
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "user_info" not in st.session_state:
+        st.session_state.user_info = None
 
 
 
 init_state()
+auth_service = AuthService()
 
 import json
 import time
@@ -156,6 +162,43 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if not st.session_state.logged_in:
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #F4B400;'>Login MasterMatch</h1>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        tab1, tab2 = st.tabs(["Sign in", "Create Account"])
+        
+        # --- TAB LOGIN ---
+        with tab1:
+            username = st.text_input("Username", key="login_user")
+            password = st.text_input("Password", type="password", key="login_pass")
+            if st.button("Login", use_container_width=True):
+                user = auth_service.login_user(username, password)
+                if user:
+                    st.session_state.logged_in = True
+                    st.session_state.user_info = user
+                    # Carrega histórico do MongoDB para a sessão atual
+                    st.session_state.messages = auth_service.load_history(username)
+                    st.rerun()
+                else:
+                    st.error("Incorrect credentials.")
+
+        # --- TAB SIGNUP ---
+        with tab2:
+            new_user = st.text_input("New Username", key="signup_user")
+            new_name = st.text_input("Your Name", key="signup_name")
+            new_pass = st.text_input("New Password", type="password", key="signup_pass")
+            if st.button("Register", use_container_width=True):
+                success, msg = auth_service.register_user(new_user, new_name, new_pass)
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+
+    st.stop()
+
 # ---------- Header (Center) ----------
 # Lottie animation on top
 
@@ -192,7 +235,16 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    user_name = st.session_state.user_info['name']
+    st.write(f"Hi, **{user_name}**! 👋")
+    
+    if st.button("Logout", key="logout_btn", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.user_info = None
+        st.session_state.messages = []
+        st.rerun()
+
+    st.markdown("<hr style='margin: 10px 0; border-color: #F4B400;'>", unsafe_allow_html=True)
 
     # Navigation buttons
     if st.button("Chat", key="chat_btn", use_container_width=True):
@@ -229,6 +281,8 @@ if selected == "chat":
         with st.chat_message("user"):
             st.markdown(prompt)
 
+        auth_service.save_message(st.session_state.user_info['username'], "user", prompt)
+
         # Assistant reply
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
@@ -244,6 +298,7 @@ if selected == "chat":
 
         st.session_state.messages.append({"role": "assistant", "content": response})
 
+        auth_service.save_message(st.session_state.user_info['username'], "assistant", response)
 elif selected == "calculator":
     render_price_calculator()
 
