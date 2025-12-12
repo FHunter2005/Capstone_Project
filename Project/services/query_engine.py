@@ -70,7 +70,7 @@ class QueryEngine:
         top_score = scored[0][0]
 
         # 4) Start with a base threshold
-        threshold = 0.60
+        threshold = 0.30
 
         # Adjust based on length of query
         if word_count <= 2:
@@ -84,8 +84,8 @@ class QueryEngine:
         elif top_score <= 0.55:
             threshold -= 0.10       # weak signal → more lenient
 
-        # Clamp between 0.45 and 0.75
-        threshold = max(0.45, min(threshold, 0.75))
+        # Clamp between 0.35 and 0.75
+        threshold = max(0.35, min(threshold, 0.70))
 
         # 5) Filter based on dynamic threshold
         filtered = [doc for score, doc in scored if score >= threshold]
