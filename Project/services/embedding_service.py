@@ -1,48 +1,52 @@
 # services/embedding_service.py
-import numpy as np
 from ai.ai_client import AIClient
 from services.db_service import DatabaseService
-from tools.similarity_tool import cosine_similarity
 
 class EmbeddingService:
     def __init__(self):
         self.ai = AIClient()
         self.db = DatabaseService()
 
-    def generate_embedding(self, text: str) -> np.ndarray:
-        values = self.ai.embed(text)
-        return np.array(values, dtype=float)
+    def generate_embedding(self, text: str) -> list:
+        """Generates the vector (list of floats) for the text."""
+        # MongoDB accepts normal Python lists
+        return self.ai.embed(text)
 
-    def ensure_embeddings(self):
-        masters = self.db.masters()
-        for doc in masters.find():
-            if not doc.get("embedding"):
-                source = doc.get("about") or doc.get("master", "")
-                if not source:
-                    continue
-                emb = self.generate_embedding(source)
-                masters.update_one(
-                    {"_id": doc["_id"]},
-                    {"$set": {"embedding": emb.tolist()}},
-                )
+    def search_similar(self, user_emb: list, top_k: int = 5):
+        """
+        Uses MongoDB Atlas Vector Search to find similar documents.
+        Returns a list of tuples: (score, doc)
+        """
+        collection = self.db.masters()
 
-    def search_similar(self, user_emb: np.ndarray, top_k: int = 5):
-        """Return top_k results as (score, doc) tuples."""
+        # The vector search pipeline
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": "vector_index",       # The name you created in Atlas
+                    "path": "embedding",           # The field where the vectors are
+                    "queryVector": user_emb,       # The user's question converted to numbers
+                    "numCandidates": top_k * 20,   # Search more candidates to ensure accuracy
+                    "limit": top_k                 # Return only the top K
+                }
+            },
+            {
+                "$project": {
+                    "embedding": 0,  # Does not bring back the huge vector (saves internet)
+                    "score": {"$meta": "vectorSearchScore"}  # Includes the similarity score
+                }
+            }
+        ]
 
+        # Executes the search on the Mongo server
+        cursor = collection.aggregate(pipeline)
+
+        # Formats the results to maintain compatibility with your query_engine.py
+        # Expected format: [(score, doc), (score, doc), ...]
         results = []
-        masters = self.db.masters()
-
-        for doc in masters.find():
-            emb_list = doc.get("embedding", [])
-            if not emb_list:
-                continue
-
-            emb = np.array(emb_list, dtype=float)
-            score = cosine_similarity(user_emb, emb)
-
+        for doc in cursor:
+            # Removes the score from the document and stores it separately
+            score = doc.pop("score", 0.0)
             results.append((score, doc))
 
-    # Sort and return top_k tuples
-        results.sort(key=lambda x: x[0], reverse=True)
-        return results[:top_k]
-
+        return results
