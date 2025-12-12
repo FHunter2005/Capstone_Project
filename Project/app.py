@@ -193,7 +193,12 @@ if not st.session_state.logged_in:
             if st.button("Register", use_container_width=True):
                 success, msg = auth_service.register_user(new_user, new_name, new_pass)
                 if success:
-                    st.success(msg)
+                    st.session_state.logged_in = True
+                    st.session_state.user_info = {'username': new_user, 'name': new_name}
+                    st.session_state.messages = []
+                    st.success("Account created successfully! Logging in...")
+                    time.sleep(1)
+                    st.rerun()
                 else:
                     st.error(msg)
 
