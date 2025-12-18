@@ -34,7 +34,7 @@ from tools.agent_tools import my_toolbox
 class AIClient:
     def __init__(self):
         genai.configure(api_key=Config.GOOGLE_API_KEY)
-        
+        self.embed_model = Config.EMBED_MODEL
         self.model = genai.GenerativeModel(
             model_name=Config.LLM_MODEL,
             tools=my_toolbox 
@@ -50,3 +50,10 @@ class AIClient:
         response = self.chat_session.send_message(user_text)
         return response.text
 
+    def embed(self, text: str):
+        """Return embedding vector (list of floats) for input text."""
+        response = genai.embed_content(
+            model=self.embed_model,
+            content=text
+        )
+        return response["embedding"]

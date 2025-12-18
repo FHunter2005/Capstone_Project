@@ -14,7 +14,7 @@ def search_masters_tool(user_query: str):
     
     # 2. SETUP (Initialize connections inside the tool)
     # use_tools=False prevents the AIClient from trying to load tools recursively
-    ai_client = AIClient(use_tools=False) 
+    ai_client = AIClient()
     db_service = DatabaseService()
     collection = db_service.masters()
 
