@@ -2,6 +2,6 @@
 Tools package – Pure functions and deterministic utilities.
 """
 
-from .similarity_tool import cosine_similarity
+from .agent_tools import search_masters_tool, get_map_link_tool
 
-__all__ = ["cosine_similarity"]
+__all__ = ["search_masters_tool", "get_map_link_tool"]

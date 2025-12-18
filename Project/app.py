@@ -3,23 +3,25 @@
 # Masters Finder – Chatbot + Calculator
 # ===========================
 import base64
+import json
+import os
+import time
 from pathlib import Path
 
-import os
+import requests
 import streamlit as st
+from streamlit_lottie import st_lottie
 
+# --- Custom Services ---
 from services.auth_service import AuthService
 from calculator import render_price_calculator
 from Project.map_tab import render_university_map
-import requests
 
+# --- Constants & Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_PATH = os.path.join(BASE_DIR, "mm.jpg")
 LOTTIE_PATH = os.path.join(BASE_DIR, "gif.json")
-SIDE_PATH = os.path.join(BASE_DIR,"photo.jpg")
-
- # lottie animation JSON
-
+SIDE_PATH = os.path.join(BASE_DIR, "photo.jpg")
 
 # ---------- Page Config ----------
 st.set_page_config(
@@ -28,7 +30,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
 
 # ---------- Session State ----------
 def init_state():
@@ -41,22 +42,18 @@ def init_state():
     if "user_info" not in st.session_state:
         st.session_state.user_info = None
 
-
-
 init_state()
 auth_service = AuthService()
 
-import json
-import time
-from streamlit_lottie import st_lottie
+# ---------- Helper Functions ----------
 
-# ---------- Encode Assets ----------
-def load_image_base64(path: Path) -> str:
+def load_image_base64(path: str) -> str:
+    """Encodes an image to base64 for embedding in HTML/CSS."""
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
 
-# ---------- Play Lottie Intro ----------
 def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, duration: int = 6):
+    """Plays a Lottie animation as an intro overlay."""
     if st.session_state.get("intro_played", False):
         return
     st.session_state["intro_played"] = True
@@ -71,7 +68,7 @@ def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, durat
     # Container for GIF
     container = st.empty()
 
-    # CSS for rounded corners
+    # CSS for rounded corners on the animation
     st.markdown(
         """
         <style>
@@ -88,20 +85,24 @@ def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, durat
         st_lottie(animation, height=height, key="intro_lottie")
 
     # Wait before showing main content
-    time.sleep(duration)  # or your desired duration
+    time.sleep(duration)
     container.empty()  # removes intro GIF after duration
 
 
-
-
 # ---------- Load Assets ----------
-logo_base64 = load_image_base64(LOGO_PATH)
-sidebar_bg_base64 = load_image_base64(SIDE_PATH)
+# (Ensure these files exist in your directory)
+try:
+    logo_base64 = load_image_base64(LOGO_PATH)
+    sidebar_bg_base64 = load_image_base64(SIDE_PATH)
+except FileNotFoundError:
+    st.error("Assets not found. Please check 'mm.jpg' and 'photo.jpg'.")
+    st.stop()
 
 # ---------- Show Lottie Intro ----------
 play_lottie_intro(LOTTIE_PATH, height=300, width=300, duration=6)
 
 
+# ---------- Custom CSS Styling ----------
 st.markdown(
     f"""
     <style>
@@ -162,6 +163,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+# ---------- Authentication Flow ----------
 if not st.session_state.logged_in:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     st.markdown("<h1 style='text-align: center; color: #F4B400;'>Login MasterMatch</h1>", unsafe_allow_html=True)
@@ -179,7 +182,7 @@ if not st.session_state.logged_in:
                 if user:
                     st.session_state.logged_in = True
                     st.session_state.user_info = user
-                    # Carrega histórico do MongoDB para a sessão atual
+                    # Load history from MongoDB
                     st.session_state.messages = auth_service.load_history(username)
                     st.rerun()
                 else:
@@ -202,11 +205,10 @@ if not st.session_state.logged_in:
                 else:
                     st.error(msg)
 
-    st.stop()
+    st.stop()  # Stop execution here if not logged in
 
-# ---------- Header (Center) ----------
-# Lottie animation on top
 
+# ---------- Main App Header ----------
 header_html = f"""
 <div style="text-align: center; padding-top: 10px; padding-bottom: 10px;">
     <img src="data:image/png;base64,{logo_base64}"
@@ -227,7 +229,7 @@ header_html = f"""
 st.markdown(header_html, unsafe_allow_html=True)
 
 
-# ---------- Sidebar Logo + Menu ----------
+# ---------- Sidebar Navigation ----------
 with st.sidebar:
     # Logo with glow + border
     st.markdown(
@@ -265,7 +267,7 @@ with st.sidebar:
         st.rerun()
 
 
-# ---------- Main Content ----------
+# ---------- Content Routing ----------
 selected = st.session_state.page
 
 if selected == "chat":
@@ -281,29 +283,33 @@ if selected == "chat":
         "Ask me about master's programs, tuition, rankings, or scholarships..."
     )
     if prompt:
-        # User message
+        # 1. Display User Message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-
         auth_service.save_message(st.session_state.user_info['username'], "user", prompt)
 
-        # Assistant reply
+        # 2. Generate Assistant Reply
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                api_url = "http://localhost:8000/query"
-                payload = {"query": prompt}
-
+            with st.spinner("O Agente está a pensar (e a pesquisar, se preciso)..."):
                 try:
-                    api_response = requests.post(api_url, json=payload).json()
-                    response = api_response.get("result", "❌ API returned no result.")
+                    # Initialize Agent Client if not in session
+                    if "agent_client" not in st.session_state:
+                        from ai.ai_client import AIClient
+                        st.session_state.agent_client = AIClient()
+                    
+                    # LLM Action
+                    response = st.session_state.agent_client.send_message_to_agent(prompt)
+                    
                 except Exception as e:
-                    response = f"❌ Error contacting backend API: {e}"
+                    response = f"❌ Erro: {e}"
+            
             st.markdown(response)
 
+        # 3. Save Assistant Message
         st.session_state.messages.append({"role": "assistant", "content": response})
-
         auth_service.save_message(st.session_state.user_info['username'], "assistant", response)
+
 elif selected == "calculator":
     render_price_calculator()
 

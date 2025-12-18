@@ -23,11 +23,11 @@ class EmbeddingService:
         pipeline = [
             {
                 "$vectorSearch": {
-                    "index": "vector_index",       # The name you created in Atlas
-                    "path": "embedding",           # The field where the vectors are
-                    "queryVector": user_emb,       # The user's question converted to numbers
-                    "numCandidates": top_k * 20,   # Search more candidates to ensure accuracy
-                    "limit": top_k                 # Return only the top K
+                    "index": "vector_index", 
+                    "path": "embedding",   
+                    "queryVector": user_emb,    
+                    "numCandidates": top_k * 20, 
+                    "limit": top_k                
                 }
             },
             {
