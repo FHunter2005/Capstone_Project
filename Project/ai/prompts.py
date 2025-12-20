@@ -1,4 +1,4 @@
-# ai/prompts.py
+'''# ai/prompts.py
 
 def multi_program_prompt(master_docs: list[dict], user_query: str) -> str:
     """
@@ -48,3 +48,4 @@ You will receive up to 5 master's programs from a dataset that ONLY contains pro
 ### Programs:
 {programs_text}
 """
+'''

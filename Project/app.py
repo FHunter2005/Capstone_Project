@@ -42,9 +42,10 @@ def init_state():
         st.session_state.logged_in = False
     if "user_info" not in st.session_state:
         st.session_state.user_info = None
-    # Store search results temporarily to render 'Save' buttons
     if "last_recommended_masters" not in st.session_state:
         st.session_state.last_recommended_masters = []
+    if "current_thread_id" not in st.session_state:
+        st.session_state.current_thread_id = None
 
 init_state()
 auth_service = AuthService()
@@ -234,6 +235,7 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+    st.caption("HISTORY")
 
     user_name = st.session_state.user_info['name']
     st.write(f"Hi, **{user_name}**! 👋")
@@ -263,12 +265,46 @@ with st.sidebar:
         st.session_state.page = "favorites"
         st.rerun()
 
+    if st.button("➕ New Conversation", use_container_width=True):
+        new_id = auth_service.create_new_thread(st.session_state.user_info['username'])
 
+        st.session_state.current_thread_id = new_id
+        st.session_state.messages = [] # Clear screen
+        st.session_state.last_recommended_masters = []
+
+        if "agent_client" in st.session_state:
+            del st.session_state.agent_client
+            
+        st.rerun()
+    
+    threads = auth_service.get_user_threads(st.session_state.user_info['username'])
+    
+    for thread in threads:
+        # If this is the active chat, make the button look "selected" (primary)
+        b_type = "primary" if thread['id'] == st.session_state.current_thread_id else "secondary"
+        
+        # Button label: Title + Date
+        label = f"{thread['title']} ({thread['date']})"
+        
+        if st.button(label, key=thread['id'], type=b_type, use_container_width=True):
+            # Switch to this thread
+            st.session_state.current_thread_id = thread['id']
+            st.session_state.messages = auth_service.load_thread_messages(thread['id'])
+            
+            # Reset AI Memory (so it learns the NEW context)
+            if "agent_client" in st.session_state:
+                del st.session_state.agent_client
+                
+            st.rerun()
 # ---------- Content Routing ----------
 selected = st.session_state.page
 
 if selected == "chat":
     st.markdown("<br>", unsafe_allow_html=True)
+
+    if st.session_state.current_thread_id is None:
+        new_id = auth_service.create_new_thread(st.session_state.user_info['username'])
+        st.session_state.current_thread_id = new_id
 
     # Display chat history
     for message in st.session_state.messages:
@@ -286,7 +322,12 @@ if selected == "chat":
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-        auth_service.save_message(st.session_state.user_info['username'], "user", prompt)
+        auth_service.save_message(st.session_state.current_thread_id, "user", prompt)
+
+        if len(st.session_state.messages) == 1:
+            # Simple title: first 30 chars of prompt
+            new_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
+            auth_service.update_thread_title(st.session_state.current_thread_id, new_title)
 
         # 2. Generate Assistant Reply
         with st.chat_message("assistant"):
@@ -307,7 +348,7 @@ if selected == "chat":
 
         # 3. Save Assistant Message
         st.session_state.messages.append({"role": "assistant", "content": response})
-        auth_service.save_message(st.session_state.user_info['username'], "assistant", response)
+        auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
 
     if st.session_state.last_recommended_masters:
         st.markdown("---")

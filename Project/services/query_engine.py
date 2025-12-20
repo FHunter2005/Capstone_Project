@@ -1,4 +1,4 @@
-# services/query_engine.py
+'''# services/query_engine.py
 
 import re
 from typing import List, Dict
@@ -202,4 +202,4 @@ class QueryEngine:
         prompt = multi_program_prompt(docs, user_input)
         explanation = self.ai.generate(prompt)
 
-        return explanation.strip() if explanation else "No elaborated text available."
+        return explanation.strip() if explanation else "No elaborated text available."'''

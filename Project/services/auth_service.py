@@ -1,6 +1,7 @@
 # services/auth_service.py
 import bcrypt
 from datetime import datetime
+from bson.objectid import ObjectId
 from services.db_service import DatabaseService
 
 class AuthService:
@@ -84,3 +85,66 @@ class AuthService:
             {"username": username},
             {"$pull": {"favorites": {"master": master_name}}}
         )
+
+    def create_new_thread(self, username, title="New Chat"):
+        """Creates a new conversation document and returns its ID."""
+        new_thread = {
+            "username": username,
+            "title": title,
+            "created_at": datetime.now(),
+            "messages": []
+        }
+        result = self.logs.insert_one(new_thread)
+        # Return the ID as a string so Streamlit can use it easily
+        return str(result.inserted_id)
+    
+    def get_user_threads(self, username):
+        """Returns a list of all conversation threads for the user, newest first."""
+        cursor = self.logs.find({"username": username}).sort("created_at", -1)
+        
+        threads = []
+        for doc in cursor:
+            threads.append({
+                "id": str(doc["_id"]),
+                "title": doc.get("title", "Untitled Chat"),
+                "date": doc["created_at"].strftime("%Y-%m-%d %H:%M")
+            })
+        return threads
+    
+    def load_thread_messages(self, thread_id):
+        """Loads messages for a specific conversation ID."""
+        if not thread_id:
+            return []
+        try:
+            # This requires 'from bson.objectid import ObjectId' at the top
+            doc = self.logs.find_one({"_id": ObjectId(thread_id)})
+            if doc and "messages" in doc:
+                return [{"role": m["role"], "content": m["content"]} for m in doc["messages"]]
+        except Exception as e:
+            print(f"Error loading thread: {e}")
+        return []
+
+    def save_message(self, thread_id, role, content):
+        """Saves a message to a SPECIFIC conversation."""
+        if not thread_id:
+            return
+            
+        self.logs.update_one(
+            {"_id": ObjectId(thread_id)},
+            {
+                "$push": {"messages": {"role": role, "content": content, "timestamp": datetime.now()}},
+                # Optional: Update title based on first message if needed
+            }
+        )
+
+    def delete_thread(self, thread_id):
+        """Deletes a specific conversation."""
+        self.logs.delete_one({"_id": ObjectId(thread_id)})
+
+    def update_thread_title(self, thread_id, new_title):
+        """Renames the chat thread."""
+        try:
+            self.logs.update_one({"_id": ObjectId(thread_id)}, {"$set": {"title": new_title}})
+        except:
+            pass
+    

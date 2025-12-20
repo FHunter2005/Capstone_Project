@@ -61,7 +61,7 @@ def search_masters_tool(user_query: str):
             f"  University: {doc.get('university', 'N/A')}\n"
             f"  Tuition Fee: {doc.get('Tuition Fee', 'N/A')}\n"
             f"  Location: {doc.get('Location', 'N/A')}\n"
-            f"  Match Score: {score:.4f}\n" 
+            f"  Match Score: {score:.4f}\n"
             f"  About: {str(doc.get('about', ''))[:200]}...\n\n"
         )
     
