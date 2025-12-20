@@ -3,26 +3,25 @@
 def search_masters_tool(user_query: str):
     """
     USE THIS TOOL when the user asks for recommendations, suggestions, or information 
-    about master's degree programs, universities, tuition fees, or courses.
-    
-    Args:
-        user_query: The specific topic the user is interested in (e.g. "Data Science", "Marketing").
+    about master's degree programs.
     """
-    # 1. LAZY IMPORTS (Crucial to avoid Circular Import errors)
+    # Lazy Imports
     from ai.ai_client import AIClient
     from services.db_service import DatabaseService
+    import streamlit as st  # Import Streamlit to access Session State
     
-    # 2. SETUP (Initialize connections inside the tool)
-    # use_tools=False prevents the AIClient from trying to load tools recursively
-    ai_client = AIClient()
+    # Initialize "Lightweight" Client
+    ai_client = AIClient(use_tools=False)
     db_service = DatabaseService()
     collection = db_service.masters()
 
-    # 3. GENERATE EMBEDDING (Logic extracted from EmbeddingService)
-    # The AI Client returns the list of floats directly
-    user_emb = ai_client.embed(user_query)
+    # Generate Embedding
+    try:
+        user_emb = ai_client.embed(user_query)
+    except Exception as e:
+        return f"Error generating embedding: {e}"
 
-    # 4. VECTOR SEARCH (Logic extracted from EmbeddingService)
+    # Vector Search
     top_k = 5
     pipeline = [
         {
@@ -42,7 +41,6 @@ def search_masters_tool(user_query: str):
         }
     ]
 
-    # Execute search
     try:
         cursor = collection.aggregate(pipeline)
         results = list(cursor)
@@ -52,39 +50,29 @@ def search_masters_tool(user_query: str):
     if not results:
         return "No masters found in the database."
 
-    # 5. FORMAT OUTPUT (Convert JSON to String for the LLM)
+    st.session_state['last_recommended_masters'] = results
+
     output_text = f"Found {len(results)} programs for '{user_query}':\n\n"
     
     for doc in results:
-        # We process the score and fields here
         score = doc.get("score", 0.0)
-        
-        # We construct a readable block of text for the Gemini Agent
         output_text += (
             f"- MASTER: {doc.get('master', 'N/A')}\n"
             f"  University: {doc.get('university', 'N/A')}\n"
             f"  Tuition Fee: {doc.get('Tuition Fee', 'N/A')}\n"
             f"  Location: {doc.get('Location', 'N/A')}\n"
             f"  Match Score: {score:.4f}\n" 
-            f"  About: {doc.get('about', '')[:200]}...\n\n" # Truncate long descriptions
+            f"  About: {str(doc.get('about', ''))[:200]}...\n\n"
         )
     
     return output_text
 
 def get_map_link_tool(university_name: str):
-    """
-    USE THIS TOOL when the user specifically asks for a map, location link, 
-    or where a university is located geographically.
-    """
-    # Lazy Import
     from services.location_service import LocationService
-    
     service = LocationService()
     link = service.get_location_link(university_name)
-    
     if link:
         return f"Google Maps Link: {link}"
     return "Location link not found in database."
 
-# List of tools to export
 my_toolbox = [search_masters_tool, get_map_link_tool]

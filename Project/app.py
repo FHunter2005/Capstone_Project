@@ -16,6 +16,7 @@ from streamlit_lottie import st_lottie
 from services.auth_service import AuthService
 from calculator import render_price_calculator
 from Project.map_tab import render_university_map
+from ai.ai_client import AIClient
 
 # --- Constants & Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +42,9 @@ def init_state():
         st.session_state.logged_in = False
     if "user_info" not in st.session_state:
         st.session_state.user_info = None
+    # Store search results temporarily to render 'Save' buttons
+    if "last_recommended_masters" not in st.session_state:
+        st.session_state.last_recommended_masters = []
 
 init_state()
 auth_service = AuthService()
@@ -48,12 +52,13 @@ auth_service = AuthService()
 # ---------- Helper Functions ----------
 
 def load_image_base64(path: str) -> str:
-    """Encodes an image to base64 for embedding in HTML/CSS."""
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode()
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
 
 def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, duration: int = 6):
-    """Plays a Lottie animation as an intro overlay."""
     if st.session_state.get("intro_played", False):
         return
     st.session_state["intro_played"] = True
@@ -62,13 +67,9 @@ def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, durat
         with open(json_path, "r") as f:
             animation = json.load(f)
     except Exception as e:
-        st.error(f"Could not load Lottie animation: {e}")
         return
 
-    # Container for GIF
     container = st.empty()
-
-    # CSS for rounded corners on the animation
     st.markdown(
         """
         <style>
@@ -84,19 +85,13 @@ def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, durat
     with container:
         st_lottie(animation, height=height, key="intro_lottie")
 
-    # Wait before showing main content
     time.sleep(duration)
-    container.empty()  # removes intro GIF after duration
+    container.empty()
 
 
 # ---------- Load Assets ----------
-# (Ensure these files exist in your directory)
-try:
-    logo_base64 = load_image_base64(LOGO_PATH)
-    sidebar_bg_base64 = load_image_base64(SIDE_PATH)
-except FileNotFoundError:
-    st.error("Assets not found. Please check 'mm.jpg' and 'photo.jpg'.")
-    st.stop()
+logo_base64 = load_image_base64(LOGO_PATH)
+sidebar_bg_base64 = load_image_base64(SIDE_PATH)
 
 # ---------- Show Lottie Intro ----------
 play_lottie_intro(LOTTIE_PATH, height=300, width=300, duration=6)
@@ -182,7 +177,6 @@ if not st.session_state.logged_in:
                 if user:
                     st.session_state.logged_in = True
                     st.session_state.user_info = user
-                    # Load history from MongoDB
                     st.session_state.messages = auth_service.load_history(username)
                     st.rerun()
                 else:
@@ -205,7 +199,7 @@ if not st.session_state.logged_in:
                 else:
                     st.error(msg)
 
-    st.stop()  # Stop execution here if not logged in
+    st.stop()
 
 
 # ---------- Main App Header ----------
@@ -231,7 +225,6 @@ st.markdown(header_html, unsafe_allow_html=True)
 
 # ---------- Sidebar Navigation ----------
 with st.sidebar:
-    # Logo with glow + border
     st.markdown(
         f"""
         <div style="text-align: center; padding: 20px 0 30px;">
@@ -253,7 +246,6 @@ with st.sidebar:
 
     st.markdown("<hr style='margin: 10px 0; border-color: #F4B400;'>", unsafe_allow_html=True)
 
-    # Navigation buttons
     if st.button("Chat", key="chat_btn", use_container_width=True):
         st.session_state.page = "chat"
         st.rerun()
@@ -264,6 +256,11 @@ with st.sidebar:
 
     if st.button("Map", key="map_btn", use_container_width=True):
         st.session_state.page = "map"
+        st.rerun()
+
+    # --- Favorites Button ---
+    if st.button("Favorites", key="fav_btn", use_container_width=True):
+        st.session_state.page = "favorites"
         st.rerun()
 
 
@@ -283,6 +280,8 @@ if selected == "chat":
         "Ask me about master's programs, tuition, rankings, or scholarships..."
     )
     if prompt:
+        st.session_state.last_recommended_masters = []
+
         # 1. Display User Message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -291,24 +290,72 @@ if selected == "chat":
 
         # 2. Generate Assistant Reply
         with st.chat_message("assistant"):
-            with st.spinner("O Agente está a pensar (e a pesquisar, se preciso)..."):
+            with st.spinner("Thinking..."):
                 try:
-                    # Initialize Agent Client if not in session
                     if "agent_client" not in st.session_state:
-                        from ai.ai_client import AIClient
-                        st.session_state.agent_client = AIClient()
+                        past_history = st.session_state.messages[-20:]
+                        st.session_state.agent_client = AIClient(history_messages=past_history)
                     
-                    # LLM Action
+                    # LLM decides if it needs to search. If it does, 
+                    # agent_tools.py will populate 'last_recommended_masters'
                     response = st.session_state.agent_client.send_message_to_agent(prompt)
                     
                 except Exception as e:
-                    response = f"❌ Erro: {e}"
+                    response = f"❌ Error: {e}"
             
             st.markdown(response)
 
         # 3. Save Assistant Message
         st.session_state.messages.append({"role": "assistant", "content": response})
         auth_service.save_message(st.session_state.user_info['username'], "assistant", response)
+
+    if st.session_state.last_recommended_masters:
+        st.markdown("---")
+        st.caption("👇 **Found Programs (Click 'Save' to add to Favorites)**")
+        
+        for prog in st.session_state.last_recommended_masters:
+            with st.container():
+                c1, c2 = st.columns([4, 1])
+                with c1:
+                    st.markdown(f"**{prog.get('master', 'Unknown')}** at *{prog.get('university', 'Unknown')}*")
+                with c2:
+                    unique_id = str(prog.get('_id'))
+                    btn_key = f"save_{unique_id}"
+                    
+                    if st.button("❤️ Save", key=btn_key):
+                        # Verify we have the user info
+                        if st.session_state.user_info:
+                            success, msg = auth_service.add_favorite(
+                                st.session_state.user_info['username'], 
+                                prog
+                            )
+                            if success:
+                                st.toast(f"Saved: {prog.get('master')}", icon="✅")
+                            else:
+                                st.toast(msg, icon="ℹ️")
+                        else:
+                            st.error("You must be logged in to save.")
+
+elif selected == "favorites":
+    st.markdown("<h2 style='text-align: center; color: #F4B400;'>My Favorite Programs ❤️</h2>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    favs = auth_service.get_user_favorites(st.session_state.user_info['username'])
+    
+    if not favs:
+        st.info("You haven't saved any programs yet. Go to the Chat to find and save some!")
+    else:
+        for f in favs:
+            with st.expander(f"{f.get('master')} - {f.get('university')}", expanded=True):
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"📍 **Location:** {f.get('location', 'N/A')}")
+                    st.write(f"💰 **Tuition:** {f.get('tuition', 'N/A')}")
+                    st.caption(f"Saved on: {f.get('saved_at', 'Unknown date')}")
+                with col2:
+                    if st.button("Remove 🗑️", key=f"del_{f.get('master')}"):
+                        auth_service.remove_favorite(st.session_state.user_info['username'], f['master'])
+                        st.rerun()
 
 elif selected == "calculator":
     render_price_calculator()
