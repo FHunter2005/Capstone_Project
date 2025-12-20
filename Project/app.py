@@ -6,9 +6,7 @@ import base64
 import json
 import os
 import time
-from pathlib import Path
 
-import requests
 import streamlit as st
 from streamlit_lottie import st_lottie
 
@@ -178,7 +176,19 @@ if not st.session_state.logged_in:
                 if user:
                     st.session_state.logged_in = True
                     st.session_state.user_info = user
-                    st.session_state.messages = auth_service.load_history(username)
+                    threads = auth_service.get_user_threads(username)
+
+                    if threads:
+                        st.session_state.current_thread_id = threads[0]["id"]
+                        st.session_state.messages = auth_service.load_thread_messages(st.session_state.current_thread_id)
+                    else:
+                        new_id = auth_service.create_new_thread(username)
+                        st.session_state.current_thread_id = new_id
+                        st.session_state.messages = []
+
+                    if "agent_client" in st.session_state:
+                        del st.session_state.agent_client
+
                     st.rerun()
                 else:
                     st.error("Incorrect credentials.")
@@ -194,6 +204,8 @@ if not st.session_state.logged_in:
                     st.session_state.logged_in = True
                     st.session_state.user_info = {'username': new_user, 'name': new_name}
                     st.session_state.messages = []
+                    new_id = auth_service.create_new_thread(new_user)
+                    st.session_state.current_thread_id = new_id
                     st.success("Account created successfully! Logging in...")
                     time.sleep(1)
                     st.rerun()
@@ -277,30 +289,50 @@ with st.sidebar:
             
         st.rerun()
     
-    threads = auth_service.get_user_threads(st.session_state.user_info['username'])
-    
+    threads = auth_service.get_user_threads(st.session_state.user_info["username"])
+
     for thread in threads:
-        # If this is the active chat, make the button look "selected" (primary)
-        b_type = "primary" if thread['id'] == st.session_state.current_thread_id else "secondary"
-        
-        # Button label: Title + Date
+        is_active = thread["id"] == st.session_state.current_thread_id
         label = f"{thread['title']} ({thread['date']})"
-        
-        if st.button(label, key=thread['id'], type=b_type, use_container_width=True):
-            # Switch to this thread
-            st.session_state.current_thread_id = thread['id']
-            st.session_state.messages = auth_service.load_thread_messages(thread['id'])
-            
-            # Reset AI Memory (so it learns the NEW context)
-            if "agent_client" in st.session_state:
-                del st.session_state.agent_client
-                
-            st.rerun()
+
+        col_a, col_b = st.columns([10, 1])
+
+        with col_a:
+            if st.button(label, key=f"open_{thread['id']}", type="primary" if is_active else "secondary", use_container_width=True):
+                st.session_state.current_thread_id = thread["id"]
+                st.session_state.messages = auth_service.load_thread_messages(thread["id"])
+
+                if "agent_client" in st.session_state:
+                    del st.session_state.agent_client
+
+                st.rerun()
+
+        with col_b:
+            if st.button("X", key=f"del_{thread['id']}", use_container_width=True):
+                auth_service.delete_thread(thread["id"])
+
+                if st.session_state.current_thread_id == thread["id"]:
+                    new_id = auth_service.create_new_thread(st.session_state.user_info['username'])
+                    st.session_state.current_thread_id = new_id
+                    st.session_state.messages = []
+
+                    if "agent_client" in st.session_state:
+                        del st.session_state.agent_client
+
+                st.rerun()
+
 # ---------- Content Routing ----------
 selected = st.session_state.page
 
 if selected == "chat":
     st.markdown("<br>", unsafe_allow_html=True)
+
+    reset_col1, reset_col2 = st.columns([6, 1])
+    with reset_col2:
+        if st.button("Reset", key="reset_agent_btn", use_container_width=True):
+            if "agent_client" in st.session_state:
+                del st.session_state.agent_client
+            st.rerun()
 
     if st.session_state.current_thread_id is None:
         new_id = auth_service.create_new_thread(st.session_state.user_info['username'])
@@ -334,17 +366,36 @@ if selected == "chat":
             with st.spinner("Thinking..."):
                 try:
                     if "agent_client" not in st.session_state:
-                        past_history = st.session_state.messages[-20:]
+                        past_history = st.session_state.messages[:-1][-20:]
                         st.session_state.agent_client = AIClient(history_messages=past_history)
-                    
-                    # LLM decides if it needs to search. If it does, 
-                    # agent_tools.py will populate 'last_recommended_masters'
+
                     response = st.session_state.agent_client.send_message_to_agent(prompt)
-                    
+
                 except Exception as e:
-                    response = f"❌ Error: {e}"
-            
+                    err = str(e).lower()
+
+                    token_related = (
+                        "maximum context" in err
+                        or "context length" in err
+                        or "token" in err
+                    )
+
+                    if token_related:
+                        if "agent_client" in st.session_state:
+                            del st.session_state.agent_client
+
+                        past_history = st.session_state.messages[:-1][-8:]
+                        st.session_state.agent_client = AIClient(history_messages=past_history)
+
+                        try:
+                            response = st.session_state.agent_client.send_message_to_agent(prompt)
+                        except Exception as e2:
+                            response = f"Error: {e2}"
+                    else:
+                        response = f"Error: {e}"
+
             st.markdown(response)
+
 
         # 3. Save Assistant Message
         st.session_state.messages.append({"role": "assistant", "content": response})
