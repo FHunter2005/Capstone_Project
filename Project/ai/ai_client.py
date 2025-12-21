@@ -1,5 +1,6 @@
 # ai/ai_client.py
 import google.generativeai as genai
+from langfuse import observe, get_client
 from utils.config import Config
 from tools.agent_tools import my_toolbox
 
@@ -27,11 +28,11 @@ class AIClient:
                 role = "user" if msg["role"] == "user" else "model"
                 content = msg["content"]
                 
-                # Gemini format:
-                gemini_history.append({
-                    "role": role,
-                    "parts": [content]
-                })
+                if content and isinstance(content, str) and content.strip():
+                    gemini_history.append({
+                        "role": role,
+                        "parts": [content]
+                    })
 
         if use_tools:
             self.model = genai.GenerativeModel(
@@ -48,10 +49,14 @@ class AIClient:
             self.model = genai.GenerativeModel(model_name=Config.LLM_MODEL)
             self.chat_session = None
 
+    @observe(name="MasterMatch_Agent_Message")
     def send_message_to_agent(self, user_text: str) -> str:
         if not self.chat_session:
             return "Error: Client initialized without tools/chat session."
         response = self.chat_session.send_message(user_text)
+
+        get_client().flush()
+
         return response.text
 
     def embed(self, text: str):

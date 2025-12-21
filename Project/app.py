@@ -2,19 +2,28 @@
 # ===========================
 # Masters Finder – Chatbot + Calculator
 # ===========================
+
+
 import base64
 import json
 import os
 import time
+import requests
 
 import streamlit as st
 from streamlit_lottie import st_lottie
+from langfuse import observe, get_client
+import pypdf
 
 # --- Custom Services ---
 from services.auth_service import AuthService
 from calculator import render_price_calculator
 from map_tab import render_university_map
 from ai.ai_client import AIClient
+from utils.observability import get_langfuse, get_langfuse_env
+
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- Constants & Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +53,8 @@ def init_state():
         st.session_state.last_recommended_masters = []
     if "current_thread_id" not in st.session_state:
         st.session_state.current_thread_id = None
+    if "show_onboarding" not in st.session_state:
+        st.session_state.show_onboarding = False
 
 init_state()
 auth_service = AuthService()
@@ -87,6 +98,15 @@ def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, durat
     time.sleep(duration)
     container.empty()
 
+def extract_text_from_pdf(uploaded_file):
+    try:
+        reader = pypdf.PdfReader(uploaded_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        return None
 
 # ---------- Load Assets ----------
 logo_base64 = load_image_base64(LOGO_PATH)
@@ -288,6 +308,13 @@ if not st.session_state.logged_in:
                 if user:
                     st.session_state.logged_in = True
                     st.session_state.user_info = user
+
+                    profile = auth_service.get_profile(username)
+                    if not profile:
+                        st.session_state.show_onboarding = True
+                    else:
+                        st.session_state.show_onboarding = False
+
                     threads = auth_service.get_user_threads(username)
                     
 
@@ -316,6 +343,7 @@ if not st.session_state.logged_in:
                 if success:
                     st.session_state.logged_in = True
                     st.session_state.user_info = {'username': new_user, 'name': new_name}
+                    st.session_state.show_onboarding = True
                     st.session_state.messages = []
                     new_id = auth_service.create_new_thread(new_user)
                     st.session_state.current_thread_id = new_id
@@ -372,6 +400,8 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.session_state.user_info = None
         st.session_state.messages = []
+        st.session_state.pop("agent_client", None)
+        st.session_state.pop("langfuse", None)
         st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)  # close mm-account
@@ -397,6 +427,10 @@ with st.sidebar:
         st.session_state.page = "favorites"
         st.rerun()
 
+    if st.button("Profile (Q&A)", key="profile_btn", use_container_width=True):
+        st.session_state.page = "profile"
+        st.rerun()
+
     st.markdown("</div>", unsafe_allow_html=True)  # close mm-nav
     st.markdown("<hr class='mm-divider'/>", unsafe_allow_html=True)
 
@@ -412,6 +446,8 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.last_recommended_masters = []
         st.session_state.pop("agent_client", None)
+        st.session_state.pop("langfuse", None)  
+
         st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -450,6 +486,7 @@ with st.sidebar:
         st.session_state.current_thread_id = selected_id
         st.session_state.messages = auth_service.load_thread_messages(selected_id)
         st.session_state.pop("agent_client", None)
+        st.session_state.pop("langfuse", None)
         st.rerun()
 
     # Actions
@@ -479,6 +516,7 @@ with st.sidebar:
                     st.session_state.messages = []
 
                 st.session_state.pop("agent_client", None)
+                st.session_state.pop("langfuse", None)
                 st.rerun()
 
 
@@ -486,122 +524,160 @@ with st.sidebar:
 # ---------- Content Routing ----------
 selected = st.session_state.page
 
+@observe(name="User_Chat_Turn")
+def traced_chat_turn(prompt: str, username: str, thread_id: str, agent_client) -> str:
+    langfuse = get_client()
+    print("LANGFUSE HOST:", os.getenv("LANGFUSE_HOST"))
+    langfuse.update_current_trace(
+        user_id=username,
+        session_id=str(thread_id),
+        tags=["streamlit", "chat"],
+        metadata={
+            "environment": os.getenv("LANGFUSE_TRACING_ENVIRONMENT", "dev"),
+            "app": "MasterMatch",
+            "page": "chat",
+        },
+    )
+    with langfuse.start_as_current_observation(
+        as_type="span", 
+        name="agent_call", 
+        input={"prompt": prompt}
+    ):
+        return agent_client.send_message_to_agent(prompt)
+
+
 if selected == "chat":
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # --- Reset Button ---
     reset_col1, reset_col2 = st.columns([6, 1])
     with reset_col2:
         if st.button("Reset", key="reset_agent_btn", use_container_width=True):
-            if "agent_client" in st.session_state:
-                del st.session_state.agent_client
+            st.session_state.pop("agent_client", None)
+            st.session_state.pop("langfuse", None)  
             st.rerun()
 
+    # --- Initialize Thread ---
     if st.session_state.current_thread_id is None:
         new_id = auth_service.create_new_thread(st.session_state.user_info['username'])
         st.session_state.current_thread_id = new_id
 
-    # Display chat history
+    # --- Display Chat History ---
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat input
-    prompt = st.chat_input(
-        "Ask me about master's programs, tuition, rankings, or scholarships..."
-    )
+    # --- Chat Input ---
+    prompt = st.chat_input("Ask me about master's programs...")
     
     if prompt:
-        st.session_state.last_recommended_masters = []
-
-        # 1. Display and Save User Message
+        # NOTE: We do NOT clear st.session_state.last_recommended_masters here!
+        
+        # 1. User Message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         auth_service.save_message(st.session_state.current_thread_id, "user", prompt)
 
         if len(st.session_state.messages) == 1:
-            # Simple title: first 30 chars of prompt
             new_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
             auth_service.update_thread_title(st.session_state.current_thread_id, new_title)
 
-        # 2. Generate and Stream Assistant Reply
+        # 2. Assistant Reply
         with st.chat_message("assistant"):
-            response = "" # Initialize variable to ensure scope availability
-            
-            # --- PHASE A: Generation (Back-end logic) ---
+            response = ""
             with st.spinner("Thinking..."):
                 try:
-                    # Check/Init Agent
-                    if "agent_client" not in st.session_state:
-                        past_history = st.session_state.messages[:-1][-20:]
-                        st.session_state.agent_client = AIClient(history_messages=past_history)
+                    api_url = "http://127.0.0.1:8000/chat"
+                    payload = {
+                        "username": st.session_state.user_info.get("username"),
+                        "message": prompt,
+                        "thread_id": st.session_state.current_thread_id,
+                        "history": st.session_state.messages[:-1] 
+                    }
 
-                    # Get Response
-                    response = st.session_state.agent_client.send_message_to_agent(prompt)
+                    api_response = requests.post(api_url, json=payload)
+
+                    if api_response.status_code == 200:
+                        data = api_response.json()
+                        response = data["response"]
+                        
+                        # Only update cards if new data came back
+                        found_data = data.get("data", [])
+                        if found_data:
+                            st.session_state.last_recommended_masters = found_data
+                        
+                    else:
+                        response = f"⚠️ API Error: {api_response.text}"
 
                 except Exception as e:
-                    # Error Handling / Retry Logic
-                    err = str(e).lower()
-                    token_related = (
-                        "maximum context" in err
-                        or "context length" in err
-                        or "token" in err
-                    )
+                    response = f"❌ Error: {e}"
 
-                    if token_related:
-                        if "agent_client" in st.session_state:
-                            del st.session_state.agent_client
-
-                        past_history = st.session_state.messages[:-1][-8:]
-                        st.session_state.agent_client = AIClient(history_messages=past_history)
-
-                        try:
-                            response = st.session_state.agent_client.send_message_to_agent(prompt)
-                        except Exception as e2:
-                            response = f"Error recovering from context limit: {e2}"
-                    else:
-                        response = f"Error: {e}"
-
-            # --- PHASE B: Streaming (Front-end visual) ---
-            # Now that we have the 'response' string, we stream it
+            # Stream the text
             def stream_data():
                 for word in response.split(" "):
                     yield word + " "
                     time.sleep(0.02)
-            
-            # Write stream actually outputs to the screen here
             st.write_stream(stream_data)
-
-        # 3. Save Assistant Message to State/DB
+    
+        # 3. Save Assistant Message
         st.session_state.messages.append({"role": "assistant", "content": response})
-        auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
 
+
+    # --- FOUND PROGRAMS SECTION (MUST BE OUTSIDE 'if prompt:') ---
     if st.session_state.last_recommended_masters:
         st.markdown("---")
-        st.caption("👇 **Found Programs (Click 'Save' to add to Favorites)**")
         
-        for prog in st.session_state.last_recommended_masters:
-            with st.container():
-                c1, c2 = st.columns([4, 1])
-                with c1:
-                    st.markdown(f"**{prog.get('master', 'Unknown')}** at *{prog.get('university', 'Unknown')}*")
-                with c2:
-                    unique_id = str(prog.get('_id'))
-                    btn_key = f"save_{unique_id}"
+        with st.expander("👇 **Found Programs (Click to Expand/Collapse)**", expanded=True):
+            
+            # Fetch favorites to check what is already saved
+            current_favs = auth_service.get_user_favorites(st.session_state.user_info['username'])
+            # Create a lookup set of (Master Name + University)
+            saved_identifiers = {
+                (f.get('master'), f.get('university')) for f in current_favs
+            }
+
+            for i, prog in enumerate(st.session_state.last_recommended_masters):
+                with st.container():
+                    c1, c2 = st.columns([4, 1])
                     
-                    if st.button("❤️ Save", key=btn_key):
-                        # Verify we have the user info
-                        if st.session_state.user_info:
-                            success, msg = auth_service.add_favorite(
-                                st.session_state.user_info['username'], 
-                                prog
-                            )
-                            if success:
-                                st.toast(f"Saved: {prog.get('master')}", icon="✅")
-                            else:
-                                st.toast(msg, icon="ℹ️")
+                    # Handle missing data gracefully
+                    master_name = prog.get('master', 'Unknown Program')
+                    uni_name = prog.get('university', 'Unknown University')
+                    
+                    with c1:
+                        st.markdown(f"**{master_name}** at *{uni_name}*")
+                        # Debug info to help you see what data is actually there
+                        # st.caption(f"Debug: {prog.get('Location')} | {prog.get('Tuition Fee')}")
+                    
+                    with c2:
+                        unique_id = str(prog.get('_id', i)) # Fallback to index if ID missing
+                        btn_key = f"save_{unique_id}_{i}"   # Add index to ensure 100% unique key
+                        
+                        # Check if already saved
+                        if (master_name, uni_name) in saved_identifiers:
+                            st.button("✅ Saved", key=btn_key, disabled=True)
                         else:
-                            st.error("You must be logged in to save.")
+                            if st.button("❤️ Save", key=btn_key):
+                                if st.session_state.user_info:
+                                    # Fix for "None" data: Check capitalized AND lowercase keys
+                                    clean_prog = prog.copy()
+                                    # Ensure we grab the data regardless of casing
+                                    clean_prog['Location'] = prog.get('Location') or prog.get('location') or "N/A"
+                                    clean_prog['Tuition Fee'] = prog.get('Tuition Fee') or prog.get('tuition') or "N/A"
+
+                                    success, msg = auth_service.add_favorite(
+                                        st.session_state.user_info['username'], 
+                                        clean_prog
+                                    )
+                                    if success:
+                                        st.toast(f"Saved: {master_name} ({uni_name})", icon="✅")
+                                        time.sleep(1) # Small delay to see the message
+                                        st.rerun()
+                                    else:
+                                        st.toast(msg, icon="ℹ️")
+                                else:
+                                    st.error("Login required.")
 
 elif selected == "favorites":
     st.markdown("<h2 style='text-align: center; color: #F4B400;'>My Favorite Programs ❤️</h2>", unsafe_allow_html=True)
@@ -612,16 +688,21 @@ elif selected == "favorites":
     if not favs:
         st.info("You haven't saved any programs yet. Go to the Chat to find and save some!")
     else:
-        for f in favs:
+        for i, f in enumerate(favs):
             with st.expander(f"{f.get('master')} - {f.get('university')}", expanded=True):
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     st.write(f"📍 **Location:** {f.get('location', 'N/A')}")
                     st.write(f"💰 **Tuition:** {f.get('tuition', 'N/A')}")
                     st.caption(f"Saved on: {f.get('saved_at', 'Unknown date')}")
+
                 with col2:
-                    if st.button("Remove 🗑️", key=f"del_{f.get('master')}"):
-                        auth_service.remove_favorite(st.session_state.user_info['username'], f['master'])
+
+                    unique_key = f"del_{f.get('master')}_{i}"
+                    if st.button("Remove 🗑️", key=unique_key):
+                        auth_service.remove_favorite(st.session_state.user_info['username'], 
+                        f.get('master'), f.get('university')
+                        )
                         st.rerun()
 
 elif selected == "calculator":
@@ -633,3 +714,89 @@ elif selected == "map":
         unsafe_allow_html=True,
     )
     render_university_map()
+
+elif selected == "profile" or st.session_state.get("show_onboarding", False):
+    
+    # Header: Changes based on if it's Onboarding or just Editing
+    if st.session_state.get("show_onboarding", False):
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center;'>🎉 Welcome to MasterMatch!</h1>", unsafe_allow_html=True)
+        st.markdown("<h4 style='text-align: center; color: gray;'>Let's get to know you to provide better recommendations.</h4>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+    else:
+        st.markdown("<h2 style='text-align: center; color: #F4B400;'>My Student Profile 🎓</h2>", unsafe_allow_html=True)
+
+    # --- TABS FOR OPTIONS ---
+    tab1, tab2 = st.tabs(["📄 Upload CV (Fast)", "✍️ Manual Q&A (Detailed)"])
+
+    # 1. OPTION A: CV UPLOAD
+    with tab1:
+        st.info("Upload your CV (PDF) and we will automatically extract your details.")
+        uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+        
+        if uploaded_file is not None:
+            if st.button("Analyze CV & Save", use_container_width=True):
+                with st.spinner("Reading PDF..."):
+                    text = extract_text_from_pdf(uploaded_file)
+                    if text:
+                        # Save the raw text to the profile
+                        success, msg = auth_service.update_profile(
+                            st.session_state.user_info['username'], 
+                            {"cv_text": text, "onboarding_completed": True}
+                        )
+                        if success:
+                            st.success("CV uploaded successfully! You can now chat.")
+                            st.session_state.show_onboarding = False
+                            time.sleep(1.5)
+                            st.session_state.page = "chat" # Go straight to chat
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                    else:
+                        st.error("Could not read text from this PDF.")
+
+    # 2. OPTION B: MANUAL FORM
+    with tab2:
+        current_profile = auth_service.get_profile(st.session_state.user_info['username'])
+        
+        with st.form("profile_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                bg = st.text_input("Undergraduate Major", value=current_profile.get("background", ""))
+                gpa = st.number_input("GPA (0-20)", value=float(current_profile.get("gpa", 0.0)))
+            with col2:
+                budget = st.number_input("Max Budget (€)", value=int(current_profile.get("budget", 0)))
+                exp = st.selectbox("Experience", ["0-1 years", "1-3 years", "3-5 years", "5+ years"])
+
+            interests = st.text_area("Career Interests", value=current_profile.get("interests", ""))
+            
+            submitted = st.form_submit_button("Save Profile", use_container_width=True)
+            
+            if submitted:
+                profile_data = {
+                    "background": bg, 
+                    "gpa": gpa, 
+                    "budget": budget, 
+                    "experience": exp, 
+                    "interests": interests,
+                    "onboarding_completed": True
+                }
+                # Keep existing CV text if they switch tabs
+                if "cv_text" in current_profile:
+                    profile_data["cv_text"] = current_profile["cv_text"]
+
+                auth_service.update_profile(st.session_state.user_info['username'], profile_data)
+                
+                st.success("Profile Saved!")
+                st.session_state.show_onboarding = False
+                time.sleep(1)
+                st.session_state.page = "chat"
+                st.rerun()
+
+    # Skip Button (Only for Onboarding mode)
+    if st.session_state.get("show_onboarding", False):
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Skip for now (I'll do it later)", type="secondary", use_container_width=True):
+            st.session_state.show_onboarding = False
+            st.session_state.page = "chat"
+            st.rerun()

@@ -39,6 +39,19 @@ class AuthService:
         return None
 
     def add_favorite(self, username: str, master_data: dict):
+        existing = self.users.find_one({
+            "username": username,
+            "favorites": {
+                "$elemMatch": {
+                    "master": master_data.get("master"),
+                    "university": master_data.get("university") 
+                }
+            }
+        })
+
+        if existing:
+            return False, "Already in favorites!"
+
         fav_item = {
             "master": master_data.get("master"),
             "university": master_data.get("university"),
@@ -47,14 +60,12 @@ class AuthService:
             "saved_at": datetime.now(),
         }
 
-        result = self.users.update_one(
+        self.users.update_one(
             {"username": username},
-            {"$addToSet": {"favorites": fav_item}},
+            {"$push": {"favorites": fav_item}},
         )
 
-        if result.modified_count > 0:
-            return True, "Saved to favorites!"
-        return False, "Already in favorites!"
+        return True, "Saved to favorites!"
 
     def get_user_favorites(self, username: str):
         user = self.users.find_one({"username": username}, {"favorites": 1})
@@ -62,10 +73,10 @@ class AuthService:
             return user["favorites"]
         return []
 
-    def remove_favorite(self, username: str, master_name: str):
+    def remove_favorite(self, username: str, master_name: str, university_name: str):
         self.users.update_one(
             {"username": username},
-            {"$pull": {"favorites": {"master": master_name}}},
+            {"$pull": {"favorites": {"master": master_name, "university": university_name}}}
         )
 
     def create_new_thread(self, username: str, title: str = "New Chat") -> str:
@@ -122,3 +133,20 @@ class AuthService:
             self.logs.update_one({"_id": ObjectId(thread_id)}, {"$set": {"title": new_title}})
         except Exception:
             return
+
+
+    def update_profile(self, username: str, profile_data: dict):
+        """Saves the user's background/CV."""
+        try:
+            self.users.update_one(
+                {"username": username},
+                {"$set": {"profile": profile_data}}
+            )
+            return True, "Profile updated successfully!"
+        except Exception as e:
+            return False, str(e)
+
+    def get_profile(self, username: str) -> dict:
+        """Gets the user's background/CV."""
+        user = self.users.find_one({"username": username})
+        return user.get("profile", {}) if user else {}

@@ -1,3 +1,4 @@
+# Project/calculator.py
 import streamlit as st
 
 def render_price_calculator():
