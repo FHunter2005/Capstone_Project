@@ -368,10 +368,12 @@ def render_chat_bubble(role: str, content: str):
     body = _to_bubble_html(content)
 
     if role == "user":
+        initials = get_user_initials()
         st.markdown(
             f"""
             <div class="mm-chat-row mm-user">
                 <div class="mm-bubble mm-user-bubble">{body}</div>
+                <div class="mm-avatar mm-user-avatar">{initials}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -386,7 +388,6 @@ def render_chat_bubble(role: str, content: str):
             """,
             unsafe_allow_html=True,
         )
-
 
 def render_assistant_stream_placeholder(placeholder, partial_text: str):
     body = _to_bubble_html(partial_text)
@@ -432,8 +433,23 @@ logo_base64 = load_image_base64(LOGO_PATH, logo_mtime)
 sidebar_bg_base64 = load_image_base64(SIDE_PATH, side_mtime)
 hero_base64 = load_image_base64(LOGIN_HERO_PATH, hero_mtime) or sidebar_bg_base64
 
+def get_user_initials():
+    """Extracts first letter of first name + first letter of last name."""
+    if st.session_state.get("user_info") and "name" in st.session_state.user_info:
+        name = st.session_state.user_info["name"].strip()
+        if not name:
+            return "Me"
+        parts = name.split()
+        if len(parts) >= 2:
+            # First char of first part + First char of last part
+            return f"{parts[0][0]}{parts[-1][0]}".upper()
+        # Fallback for single names: First two chars
+        return name[:2].upper()
+    return "Me"
+
 # ---------- Show Lottie Intro ----------
 play_lottie_intro(LOTTIE_PATH, size=400, duration=4, bg_color="#fbf7eb", shift_x="0vw", scale=1.0)
+
 
 # ---------- Global CSS ----------
 st.markdown(
@@ -613,6 +629,14 @@ st.markdown(
         border: 1px solid rgba(255,255,255,0.10);
         flex: 0 0 36px;
         margin-top: 2px;
+    }}
+
+    .mm-chat-row.mm-assistant .mm-avatar {{ 
+        background: linear-gradient(135deg, rgba(244,180,0,0.35), rgba(167,139,250,0.35));
+    }}
+
+    .mm-user-avatar {{
+        background: linear-gradient(135deg, #4b5563, #1f2937);
     }}
 
     .mm-bubble {{
@@ -962,7 +986,7 @@ with st.sidebar:
         if ids:
             with st.container(height=360, border=False):
                 selected_id = st.radio(
-                    label="",
+                    label="Conversations",
                     options=ids,
                     format_func=_label,
                     index=ids.index(st.session_state.current_thread_id)
@@ -1166,7 +1190,13 @@ elif selected == "chat":
 
     reset_col1, reset_col2 = st.columns([6, 1])
     with reset_col2:
-        if st.button("Reset", key="reset_agent_btn", use_container_width=True):
+        if st.button("Clear Chat", key="reset_agent_btn", use_container_width=True):
+
+            st.session_state.messages = []
+
+            st.session_state.last_recommended_masters = []
+
+
             st.session_state.pop("agent_client", None)
             st.session_state.pop("langfuse", None)
             st.rerun()
@@ -1258,8 +1288,11 @@ elif selected == "chat":
         st.markdown("</div>", unsafe_allow_html=True)
 
         # --- 4. SAVE TO STATE & DB ---
-        st.session_state.messages.append({"role": "assistant", "content": response, "data": found_data})
-        auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": response, 
+            "data": found_data})
+        
 
 elif selected == "favorites":
     st.markdown("<h2 style='text-align: center; color: #F4B400;'>My Favorite Programs ❤️</h2>", unsafe_allow_html=True)

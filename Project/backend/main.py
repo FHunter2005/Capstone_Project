@@ -102,7 +102,13 @@ async def chat_endpoint(
 
         # 7. Save to DB
         auth_service.save_message(request.thread_id, "user", request.message)
-        auth_service.save_message(request.thread_id, "assistant", ai_response_text)
+        
+        auth_service.save_message(
+            request.thread_id, 
+            "assistant", 
+            ai_response_text, 
+            data=found_programs
+        )
 
         return ChatResponse(response=ai_response_text, data=found_programs)
 
