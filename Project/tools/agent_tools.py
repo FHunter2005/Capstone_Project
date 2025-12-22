@@ -1,6 +1,6 @@
 from __future__ import annotations
 from langfuse import observe
-
+import re
 
 def _tool_observation(tool_name: str, input_data: dict):
     """
@@ -22,13 +22,40 @@ def _tool_observation(tool_name: str, input_data: dict):
 
 # Project/tools/agent_tools.py
 
+# ... (keep _tool_observation function as is) ...
+
+def parse_tuition_value(tuition_str: str) -> float:
+    """
+    Extracts the numeric value from strings like '1250 EUR / year' or '30 000 EUR'.
+    Returns a float or a high number if not found.
+    """
+    if not tuition_str or not isinstance(tuition_str, str):
+        return 0.0
+    
+    # Remove spaces (e.g. "30 000") and look for digits
+    clean_str = tuition_str.replace(" ", "").replace(",", ".")
+    match = re.search(r"(\d+)", clean_str)
+    if match:
+        return float(match.group(1))
+    return 0.0
+
 @observe(name="tool_search_masters")
-def search_masters_tool(user_query: str):
+def search_masters_tool(user_query: str, max_budget: int = None, preferred_location: str = None, preferred_duration: str = None):
     """
-    USE THIS TOOL when the user asks for recommendations, suggestions, or information
-    about master's degree programs in Portugal.
+    USE THIS TOOL to find master's programs.
+    
+    Args:
+        user_query: The topic or field of study (e.g. "Marketing", "AI").
+        max_budget: The maximum tuition fee allowed (in EUR).
+        preferred_location: The city or region (e.g. "Lisbon").
+        preferred_duration: The duration (e.g. "2 years").
     """
-    obs = _tool_observation("search_masters_tool", {"user_query": user_query})
+    obs = _tool_observation("search_masters_tool", {
+        "user_query": user_query, 
+        "max_budget": max_budget,
+        "location": preferred_location,
+        "duration": preferred_duration
+    })
 
     from ai.ai_client import AIClient
     from services.db_service import DatabaseService
@@ -40,44 +67,106 @@ def search_masters_tool(user_query: str):
 
         user_emb = ai_client.embed(user_query)
 
-        top_k = 10
+        # 1. Fetch a LARGER pool of candidates (e.g. 50) based on semantic similarity
+        #    We filter them using Python logic below to ensure strict compliance.
+        top_k = 50 
         pipeline = [
             {"$vectorSearch": {
                 "index": "vector_index",
                 "path": "embedding",
                 "queryVector": user_emb,
-                "numCandidates": top_k * 20,
+                "numCandidates": top_k * 10,
                 "limit": top_k,
             }},
             {"$project": {"embedding": 0, "score": {"$meta": "vectorSearchScore"}}}
         ]
 
-        results = list(collection.aggregate(pipeline))
+        raw_results = list(collection.aggregate(pipeline))
 
-        if not results:
-            return {"text": "No programs found.", "raw_data": []}
+        if not raw_results:
+            return {"text": "No programs found in the database.", "raw_data": []}
 
-        # Create a string representation for the AI to "read"
-        sanitized_results = []
-        summary = f"Found {len(results)} potential matches. NOW SELECT THE BEST ONES (Max 5) AND CALL 'final_recommendations_tool':\n"
-        for doc in results:
-            if "_id" in doc:
-                doc["_id"] = str(doc["_id"])
-            sanitized_results.append(doc)
-            summary += f"- ID: {doc.get('_id')} | {doc.get('master')} at {doc.get('university')} (Score: {doc.get('score', 0):.2f})\n"
+        # 2. Filter and Rank Results in Python
+        exact_matches = []
+        close_matches = []
+        summary = f"Found {len(raw_results)} potential matches. NOW SELECT THE BEST ONES (Max 5) AND CALL 'final_recommendations_tool':\n"
+        for doc in raw_results:
+            doc["_id"] = str(doc.get("_id"))
+            
+            # --- Check Constraints ---
+            is_match = True
+            reasons = []
 
-        return {"text": summary, "raw_data": results}
+            # Check Budget
+            if max_budget:
+                fee_str = doc.get("Tuition Fee") or doc.get("tuition", "")
+                cost = parse_tuition_value(fee_str)
+                # If cost > budget + 10% tolerance, fail
+                if cost > (max_budget * 1.1): 
+                    is_match = False
+                    reasons.append(f"Over budget ({fee_str})")
+
+            # Check Location (Partial string match)
+            if preferred_location:
+                loc = doc.get("Location") or doc.get("location", "")
+                if preferred_location.lower() not in loc.lower():
+                    is_match = False
+                    reasons.append(f"Wrong location ({loc})")
+            
+            # Check Duration
+            if preferred_duration:
+                dur = doc.get("Duration") or doc.get("duration", "")
+                # Simple check: if user wants "1 year" and course is "2 years", that's a mismatch
+                if preferred_duration.lower() not in dur.lower():
+                     # Allow slight flexibility (e.g. "2 years" fits "1-2 years") could be added here
+                     is_match = False
+                     reasons.append(f"Duration mismatch ({dur})")
+
+            # --- Categorize ---
+            if is_match:
+                exact_matches.append(doc)
+            else:
+                # Only keep close matches that have high semantic relevance (score)
+                # or failed only 1-2 criteria.
+                doc["missed_criteria"] = ", ".join(reasons)
+                close_matches.append(doc)
+
+        # 3. Construct the Response
+        # Priority: Exact Matches -> Top 5
+        final_results = exact_matches[:5]
+        
+        # Safety Net: If no exact matches, pick top close matches
+        safety_net_triggered = False
+        if not final_results:
+            safety_net_triggered = True
+            final_results = close_matches[:3] # Suggest top 3 alternatives
+
+        summary = ""
+        if safety_net_triggered:
+            summary += f"⚠️ NO EXACT MATCHES FOUND for budget < {max_budget}, {preferred_location}, {preferred_duration}.\n"
+            summary += "Here are the closest alternatives (please check why they didn't match):\n\n"
+        else:
+            summary += f"✅ Found {len(exact_matches)} programs matching all criteria:\n"
+
+        for doc in final_results:
+            summary += f"- ID: {doc.get('_id')} | {doc.get('master')} at {doc.get('university')}\n"
+            summary += f"  Location: {doc.get('Location')} | Fee: {doc.get('Tuition Fee')} | Duration: {doc.get('Duration')}\n"
+            if "missed_criteria" in doc:
+                summary += f"  (Note: {doc['missed_criteria']})\n"
+            summary += "\n"
+
+        return {"text": summary, "raw_data": final_results}
 
     try:
         if obs:
             with obs as span:
-                output = _run()
-                return output 
+                return _run()
         else:
-            res = _run()
-            return res
+            return _run()
     except Exception as e:
         return f"Error: {e}"
+
+# ... (keep get_map_link_tool and my_toolbox definition) ...
 
 @observe(name="tool_get_map_link")
 def get_map_link_tool(university_name: str):

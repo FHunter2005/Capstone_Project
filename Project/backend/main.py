@@ -81,6 +81,16 @@ async def chat_endpoint(
             user_context=user_persona, 
             intent="general"
         )
+        
+        # Explicitly append structured constraints to ensure the AI sees the numbers
+        if user_profile:
+             constraints = []
+             if user_profile.get("budget"): constraints.append(f"Budget Limit: {user_profile.get('budget')} EUR")
+             if user_profile.get("city"): constraints.append(f"Preferred City: {user_profile.get('city')}")
+             
+             if constraints:
+                 system_instruction += "\n\nHARD CONSTRAINTS (Use these in tool arguments):\n" + "\n".join(constraints)
+        # ----------------------
 
         # 4. History & AI Call
         history_for_ai = request.history[-15:] if request.history else []

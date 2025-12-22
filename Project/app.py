@@ -1186,36 +1186,66 @@ elif selected == "profile":
     with tab_qa:
         with st.form("profile_form"):
             col1, col2 = st.columns(2)
+            
             with col1:
+                # Background (Text allows empty string natively)
                 bg = st.text_input("Undergraduate Major", value=current_profile.get("background", ""))
-                gpa = st.number_input("GPA (0-20)", value=float(current_profile.get("gpa", 0.0)))
+                
+                # GPA: Handle None vs 0.0
+                # If stored value is 0 or None, default to None (empty input) so user sees "empty"
+                stored_gpa = current_profile.get("gpa")
+                if stored_gpa == 0: stored_gpa = None
+                
+                gpa = st.number_input(
+                    "GPA (0-20)", 
+                    min_value=0.0, 
+                    max_value=20.0, 
+                    value=float(stored_gpa) if stored_gpa is not None else None,
+                    placeholder="Leave empty if not applicable"
+                )
+                
                 city = st.text_input("City of Preference", value=current_profile.get("city", ""))
 
             with col2:
-                budget = st.number_input("Max Budget (€)", value=int(current_profile.get("budget", 0)))
-                exp = st.selectbox(
-                    "Experience",
-                    ["0-1 years", "1-3 years", "3-5 years", "5+ years"],
-                    index=["0-1 years", "1-3 years", "3-5 years", "5+ years"].index(
-                        current_profile.get("experience", "0-1 years")
-                    )
-                    if current_profile.get("experience") in ["0-1 years", "1-3 years", "3-5 years", "5+ years"]
-                    else 0,
+                # Budget: Handle None vs 0
+                stored_budget = current_profile.get("budget")
+                if stored_budget == 0: stored_budget = None
+                
+                budget = st.number_input(
+                    "Max Budget (€)", 
+                    min_value=0, 
+                    step=100, 
+                    value=int(stored_budget) if stored_budget is not None else None,
+                    placeholder="Leave empty for no limit"
                 )
+                
+                # Experience: Add "No Preference" option
+                exp_options = ["No Preference", "0-1 years", "1-3 years", "3-5 years", "5+ years"]
+                stored_exp = current_profile.get("experience")
+                
+                # Default to index 0 ("No Preference") if stored value invalid or missing
+                idx = exp_options.index(stored_exp) if stored_exp in exp_options else 0
+                
+                exp = st.selectbox("Experience", exp_options, index=idx)
 
             interests = st.text_area("Career Interests", value=current_profile.get("interests", ""))
 
             submitted = st.form_submit_button("Save Profile", use_container_width=True)
             if submitted:
+                # Prepare data (convert "No Preference" to None/Empty for cleaner AI context)
+                final_exp = exp if exp != "No Preference" else None
+                
                 profile_data = {
                     "background": bg,
-                    "gpa": gpa,
+                    "gpa": gpa,     # Will be None if empty
                     "city": city,
-                    "budget": budget,
-                    "experience": exp,
+                    "budget": budget, # Will be None if empty
+                    "experience": final_exp,
                     "interests": interests,
                     "onboarding_completed": True,
                 }
+                
+                # Preserve CV data
                 if "cv_text" in current_profile:
                     profile_data["cv_text"] = current_profile["cv_text"]
                 if "cv_documents" in current_profile:
@@ -1232,12 +1262,22 @@ elif selected == "profile":
                 else:
                     st.error(msg)
 
-    # optional skip button if onboarding is pending
-    if st.session_state.show_onboarding:
+        # Clear Button (Optional)
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Skip for now (I'll do it later)", type="secondary", use_container_width=True):
-            st.session_state.page = "chat"
-            st.rerun()
+        if st.button("🗑️ Clear Manual Q&A Data", type="secondary", use_container_width=True):
+            empty_data = {
+                "background": "",
+                "gpa": None,
+                "city": "",
+                "budget": None,
+                "experience": None,
+                "interests": "",
+            }
+            success, msg = auth_service.update_profile(username, empty_data)
+            if success:
+                st.toast("Manual Q&A data cleared!", icon="🗑️")
+                time.sleep(0.8)
+                st.rerun()
 
 
 elif selected == "chat":
