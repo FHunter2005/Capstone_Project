@@ -89,7 +89,7 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
         # 2. Filter and Rank Results in Python
         exact_matches = []
         close_matches = []
-        summary = f"Found {len(raw_results)} potential matches. NOW SELECT THE BEST ONES (Max 5) AND CALL 'final_recommendations_tool':\n"
+
         for doc in raw_results:
             doc["_id"] = str(doc.get("_id"))
             
@@ -149,7 +149,7 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
             summary += f"✅ Found {len(exact_matches)} programs matching all criteria:\n"
 
         for doc in final_results:
-            summary += f"- ID: {doc.get('_id')} | {doc.get('master')} at {doc.get('university')}\n"
+            summary += f"- {doc.get('master')} at {doc.get('university')}\n"
             summary += f"  Location: {doc.get('Location')} | Fee: {doc.get('Tuition Fee')} | Duration: {doc.get('Duration')}\n"
             if "missed_criteria" in doc:
                 summary += f"  (Note: {doc['missed_criteria']})\n"
