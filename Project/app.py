@@ -648,6 +648,10 @@ if not st.session_state.logged_in:
             if st.button("Sign in", use_container_width=True, key="login_btn"):
                 user = auth_service.login_user(username, password)
                 if user:
+
+                    token = auth_service.create_access_token(data={"sub": username})
+
+                    st.session_state.auth_token = token
                     st.session_state.logged_in = True
                     st.session_state.user_info = user
                     st.session_state.page = "chat"
@@ -677,6 +681,10 @@ if not st.session_state.logged_in:
             if st.button("Create account", use_container_width=True, key="signup_btn"):
                 success, msg = auth_service.register_user(new_user, new_name, new_pass)
                 if success:
+                    
+                    token = auth_service.create_access_token(data={"sub": new_user})
+
+                    st.session_state.auth_token = token
                     st.session_state.logged_in = True
                     st.session_state.user_info = {"username": new_user, "name": new_name}
                     st.session_state.page = "chat"
@@ -1069,18 +1077,34 @@ elif selected == "chat":
                     {"role": m["role"], "content": m["content"]}
                     for m in st.session_state.messages[:-1]
                 ]
+
+                headers = {
+                    "Authorization": f"Bearer {st.session_state.get('auth_token', '')}"
+                }
+
                 payload = {
                     "username": username,
                     "message": prompt,
                     "thread_id": st.session_state.current_thread_id,
                     "history": clean_history,
                 }
-                api_response = requests.post(CHAT_ENDPOINT, json=payload, timeout=120)
+
+                api_response = requests.post(
+                    CHAT_ENDPOINT, 
+                    json=payload, 
+                    headers=headers, 
+                    timeout=120
+                )
 
                 if api_response.status_code == 200:
                     data = api_response.json()
                     response = data.get("response", "")
                     found_data = data.get("data", []) or []
+
+                elif api_response.status_code == 401:
+                    st.error("Session expired. Please log in again.")
+                    do_logout()
+                    
                 else:
                     response = f"⚠️ API Error: {api_response.text}"
 
