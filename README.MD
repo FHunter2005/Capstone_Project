@@ -38,7 +38,7 @@ Unlike generic chatbots, MasterMatch combines a specialized vector database of u
 
 MasterMatch follows a **Client-Server** architecture. The frontend (Streamlit) handles user interaction, while the backend (FastAPI) manages authentication and the AI reasoning loop.
 
-For a deep dive into our system design, data flow diagrams, and technical decisions, please see our **[Architecture Documentation](docs/ARCHITECTURE.md)**.
+For a deep dive into our system design, data flow diagrams and technical decisions, please see our **[Architecture Documentation](docs/ARCHITECTURE.md)**.
 
 ## Installation & Setup
 
@@ -109,7 +109,7 @@ uv run streamlit run app.py
 
 **Complete Profile**: Navigate to the Profile tab. You can either fill in the questionnaire manually or upload your CV (PDF) for automatic extraction.
 
-**Chat:** Go to the Chat tab and ask questions like "Find me a Marketing Maste.
+**Chat:** Go to the Chat tab and ask questions like "Find me a Marketing Master".
 
 **Visualize:** Use the Map tab to see where the recommended universities are located.
 
