@@ -115,17 +115,39 @@ class AuthService:
         try:
             doc = self.logs.find_one({"_id": ObjectId(thread_id)})
             if doc and "messages" in doc:
-                return [{"role": m["role"], "content": m["content"]} for m in doc["messages"]]
+                # FIX: Explicitly retrieve 'data' so the collapsible list can render
+                return [
+                    {
+                        "role": m["role"], 
+                        "content": m["content"], 
+                        "data": m.get("data") # <--- Retrieves the list of masters
+                    } 
+                    for m in doc["messages"]
+                ]
         except Exception:
             return []
         return []
 
-    def save_message(self, thread_id: str, role: str, content: str):
+    def save_message(self, thread_id: str, role: str, content: str, data: list = None):
+        """
+        Saves a message to the database. 
+        Now accepts optional 'data' to persist the university recommendations.
+        """
         if not thread_id:
             return
+        
+        message_doc = {
+            "role": role, 
+            "content": content, 
+            "timestamp": datetime.now()
+        }
+        
+        if data:
+            message_doc["data"] = data
+
         self.logs.update_one(
             {"_id": ObjectId(thread_id)},
-            {"$push": {"messages": {"role": role, "content": content, "timestamp": datetime.now()}}},
+            {"$push": {"messages": message_doc}},
         )
 
     def delete_thread(self, thread_id: str):
