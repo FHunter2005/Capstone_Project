@@ -1229,17 +1229,27 @@ elif selected == "profile":
 
 elif selected == "chat":
     ensure_thread()
+    
+    # --- NEW: CV Warning Balloon ---
+    # Check if the user has uploaded a CV (documents or text)
+    username = st.session_state.user_info["username"]
+    current_profile = auth_service.get_profile(username) or {}
+    has_cv = current_profile.get("cv_documents") or current_profile.get("cv_text")
+
+    if not has_cv:
+        st.warning(
+            "You can go into the Q&A page and upload CV so that the AI has better past knowledge of you and so recommend better stuff for you",
+            icon="🎈"
+        )
+    # -------------------------------
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     reset_col1, reset_col2 = st.columns([6, 1])
     with reset_col2:
         if st.button("Clear Chat", key="reset_agent_btn", use_container_width=True):
-
             st.session_state.messages = []
-
             st.session_state.last_recommended_masters = []
-
-
             st.session_state.pop("agent_client", None)
             st.session_state.pop("langfuse", None)
             st.rerun()
