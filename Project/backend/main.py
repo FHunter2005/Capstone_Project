@@ -2,7 +2,8 @@
 import sys
 import os
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,6 +16,24 @@ app = FastAPI(title="MasterMatch API", version="1.0.0")
 # Global instances to avoid re-initializing on every request
 auth_service = AuthService()
 
+# This helper will look for the "Authorization: Bearer <token>" header
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+# --- Security Dependency ---
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    """
+    Verifies the JWT token and returns the username. 
+    Raises 401 if the token is invalid or expired.
+    """
+    username = auth_service.verify_token(token)
+    if not username:
+        raise HTTPException(
+            status_code=401, 
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return username
+
 class ChatRequest(BaseModel):
     username: str
     message: str
@@ -26,8 +45,15 @@ class ChatResponse(BaseModel):
     data: Optional[List[Dict[str, Any]]] = None 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(
+    request: ChatRequest, 
+    current_user: str = Depends(get_current_user) # Protect the endpoint
+):
     try:
+        # Security Check: Ensure the token-user matches the requested username
+        if current_user != request.username:
+            raise HTTPException(status_code=403, detail="Forbidden: You cannot act as another user")
+
         # 1. Get User Profile Context
         user_profile = auth_service.get_profile(request.username)
         
@@ -58,15 +84,10 @@ async def chat_endpoint(request: ChatRequest):
             history_for_ai.insert(0, {"role": "system", "content": context_str})
 
         # 3. Run AI and Capture Tool Results
-        # In a service-oriented architecture, we bypass the global buffer
         client = AIClient(history_messages=history_for_ai)
-        
-        # We assume search_masters_tool is updated to return structured data 
-        # which the AIClient can now expose via a new property or method.
         ai_response_text = client.send_message_to_agent(request.message)
 
-        # 4. Extract Data from Tool Calls (Captures results specifically for this request)
-        # This replaces list(RESULTS_BUFFER) to ensure thread safety
+        # 4. Extract Data from Tool Calls
         found_programs = []
         if hasattr(client, 'last_tool_results') and client.last_tool_results:
             found_programs = client.last_tool_results
@@ -80,6 +101,8 @@ async def chat_endpoint(request: ChatRequest):
 
         return ChatResponse(response=ai_response_text, data=found_programs)
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         print(f"❌ API Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
