@@ -9,6 +9,7 @@ import os
 import time
 import requests
 from datetime import datetime
+import html as html_lib
 
 import streamlit as st
 from streamlit_lottie import st_lottie
@@ -18,6 +19,13 @@ load_dotenv()
 
 from langfuse import observe, get_client
 import pypdf
+
+# Markdown -> HTML (for chat bubbles formatting)
+# pip install markdown-it-py
+try:
+    from markdown_it import MarkdownIt
+except Exception:
+    MarkdownIt = None
 
 # --- Custom Services ---
 from services.auth_service import AuthService
@@ -31,8 +39,8 @@ LOGO_PATH = os.path.join(BASE_DIR, "mm.png")
 LOTTIE_PATH = os.path.join(BASE_DIR, "gif.json")
 SIDE_PATH = os.path.join(BASE_DIR, "photo.jpg")
 
-# Optional: place login_hero.jpg next to app.py
-LOGIN_HERO_PATH = os.path.join(BASE_DIR,"capa.jpg")
+# Optional: place capa.jpg next to app.py
+LOGIN_HERO_PATH = os.path.join(BASE_DIR, "capa.jpg")
 
 # Backend URL (use env var in deploy; defaults to local)
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000")
@@ -69,10 +77,13 @@ def init_state():
 init_state()
 auth_service = AuthService()
 
-
 # ---------- Helper Functions ----------
 @st.cache_data
-def load_image_base64(path: str) -> str:
+def load_image_base64(path: str, mtime: float = 0.0) -> str:
+    """
+    mtime param ensures cache refreshes if the file changes.
+    Call with mtime=os.path.getmtime(path) when possible.
+    """
     try:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode()
@@ -150,54 +161,113 @@ def refresh_onboarding_flag():
     except Exception:
         st.session_state.show_onboarding = False
 
+
 def render_recommendations(programs, msg_index):
     """
     Renders the list of programs for a specific message.
     msg_index is used to ensure button keys are unique per message.
+
+    OPTION 1 (implemented): tighter spacing by removing st.divider()
+    and using a compact custom <hr>.
     """
     if not programs:
         return
 
-    # Create a unique expander for this specific message
     with st.expander(f"👇 Found {len(programs)} Programs", expanded=True):
         username = st.session_state.user_info["username"]
         current_favs = auth_service.get_user_favorites(username)
         saved_identifiers = {(f.get("master"), f.get("university")) for f in current_favs}
 
         for i, prog in enumerate(programs):
-            with st.container():
-                c1, c2 = st.columns([4, 1])
-                master_name = prog.get("master", "Unknown Program")
-                uni_name = prog.get("university", "Unknown University")
+            c1, c2 = st.columns([4, 1], vertical_alignment="center")
+            master_name = prog.get("master", "Unknown Program")
+            uni_name = prog.get("university", "Unknown University")
 
-                with c1:
-                    st.markdown(f"**{master_name}** at *{uni_name}*")
-                    # Optional: Add location/tuition here if available
-                    loc = prog.get("Location") or prog.get("location")
-                    if loc: st.caption(f"📍 {loc}")
+            with c1:
+                st.markdown(f"**{master_name}** at *{uni_name}*")
+                loc = prog.get("Location") or prog.get("location")
+                if loc:
+                    st.caption(f"📍 {loc}")
 
-                with c2:
-                    unique_id = str(prog.get("_id", i))
-                    # KEY FIX: The key includes the message index so buttons don't conflict
-                    btn_key = f"save_{msg_index}_{i}_{unique_id}"
+            with c2:
+                unique_id = str(prog.get("_id", i))
+                btn_key = f"save_{msg_index}_{i}_{unique_id}"
 
-                    if (master_name, uni_name) in saved_identifiers:
-                        st.button("✅ Saved", key=btn_key, disabled=True)
-                    else:
-                        if st.button("❤️ Save", key=btn_key):
-                            clean_prog = prog.copy()
-                            # Normalize keys
-                            clean_prog["Location"] = prog.get("Location") or prog.get("location") or "N/A"
-                            clean_prog["Tuition Fee"] = prog.get("Tuition Fee") or prog.get("tuition") or "N/A"
+                if (master_name, uni_name) in saved_identifiers:
+                    st.button("✅ Saved", key=btn_key, disabled=True, use_container_width=True)
+                else:
+                    if st.button("❤️ Save", key=btn_key, use_container_width=True):
+                        clean_prog = prog.copy()
+                        clean_prog["Location"] = prog.get("Location") or prog.get("location") or "N/A"
+                        clean_prog["Tuition Fee"] = prog.get("Tuition Fee") or prog.get("tuition") or "N/A"
 
-                            success, msg = auth_service.add_favorite(username, clean_prog)
-                            if success:
-                                st.toast(f"Saved: {master_name}", icon="✅")
-                                time.sleep(0.5)
-                                st.rerun()
-                            else:
-                                st.toast(msg, icon="ℹ️")
-            st.divider()
+                        success, msg = auth_service.add_favorite(username, clean_prog)
+                        if success:
+                            st.toast(f"Saved: {master_name}", icon="✅")
+                            time.sleep(0.4)
+                            st.rerun()
+                        else:
+                            st.toast(msg, icon="ℹ️")
+
+            # compact divider (less spacing than st.divider)
+            if i != len(programs) - 1:
+                st.markdown("<hr class='mm-rec-divider'/>", unsafe_allow_html=True)
+
+
+# ---------- Custom chat bubbles (assistant LEFT, user RIGHT) ----------
+# Markdown renderer (safe: HTML disabled). Falls back to basic escaping if missing.
+MD_RENDERER = None
+if MarkdownIt is not None:
+    MD_RENDERER = MarkdownIt("commonmark", {"html": False, "breaks": True})
+
+
+def _to_bubble_html(text: str) -> str:
+    """
+    Convert Markdown -> safe HTML (no raw HTML allowed).
+    Supports **bold**, lists, numbered lists, etc.
+    If markdown-it-py isn't installed, fallback to plain escaped text w/ line breaks.
+    """
+    t = text or ""
+    if MD_RENDERER is None:
+        return html_lib.escape(t).replace("\n", "<br>")
+    return MD_RENDERER.render(t)
+
+
+def render_chat_bubble(role: str, content: str):
+    body = _to_bubble_html(content)
+
+    if role == "user":
+        st.markdown(
+            f"""
+            <div class="mm-chat-row mm-user">
+                <div class="mm-bubble mm-user-bubble">{body}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"""
+            <div class="mm-chat-row mm-assistant">
+                <div class="mm-avatar">MM</div>
+                <div class="mm-bubble mm-assistant-bubble">{body}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_assistant_stream_placeholder(placeholder, partial_text: str):
+    body = _to_bubble_html(partial_text)
+    placeholder.markdown(
+        f"""
+        <div class="mm-chat-row mm-assistant">
+            <div class="mm-avatar">MM</div>
+            <div class="mm-bubble mm-assistant-bubble">{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # Optional tracing if you later switch to AIClient direct calls
@@ -223,18 +293,36 @@ def traced_chat_turn(prompt: str, username: str, thread_id: str, agent_client) -
 
 
 # ---------- Load Assets ----------
-logo_base64 = load_image_base64(LOGO_PATH)
-sidebar_bg_base64 = load_image_base64(SIDE_PATH)
-hero_base64 = load_image_base64(LOGIN_HERO_PATH) or sidebar_bg_base64
+logo_mtime = os.path.getmtime(LOGO_PATH) if os.path.exists(LOGO_PATH) else 0
+side_mtime = os.path.getmtime(SIDE_PATH) if os.path.exists(SIDE_PATH) else 0
+hero_mtime = os.path.getmtime(LOGIN_HERO_PATH) if os.path.exists(LOGIN_HERO_PATH) else 0
+
+logo_base64 = load_image_base64(LOGO_PATH, logo_mtime)
+sidebar_bg_base64 = load_image_base64(SIDE_PATH, side_mtime)
+hero_base64 = load_image_base64(LOGIN_HERO_PATH, hero_mtime) or sidebar_bg_base64
 
 # ---------- Show Lottie Intro ----------
 play_lottie_intro(LOTTIE_PATH, height=300, width=300, duration=6)
-
 
 # ---------- Global CSS ----------
 st.markdown(
     f"""
     <style>
+    /* Top + bottom bars color (Streamlit chrome) */
+    header[data-testid="stHeader"] {{
+        background: rgba(10, 14, 22, 0.92) !important;
+        border-bottom: 1px solid rgba(244,180,0,0.20) !important;
+    }}
+    [data-testid="stToolbar"] {{
+        background: transparent !important;
+    }}
+    /* Bottom container varies by Streamlit version; target common selectors */
+    [data-testid="stBottomBlockContainer"],
+    [data-testid="stBottom"] {{
+        background: rgba(10, 14, 22, 0.92) !important;
+        border-top: 1px solid rgba(244,180,0,0.20) !important;
+    }}
+
     /* Sidebar background */
     [data-testid="stSidebar"] {{
         background-image:
@@ -358,11 +446,108 @@ st.markdown(
     [data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover {{
         background: rgba(255,255,255,0.22);
     }}
+
+    /* --------- CHAT (assistant LEFT, user RIGHT) --------- */
+    .mm-chat-container {{
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 0 10px;
+    }}
+
+    .mm-chat-row {{
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin: 12px 0;
+    }}
+
+    .mm-user {{
+        justify-content: flex-end;
+    }}
+
+    .mm-assistant {{
+        justify-content: flex-start;
+    }}
+
+    .mm-avatar {{
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        font-size: 12px;
+        color: rgba(255,255,255,0.92);
+        background: linear-gradient(135deg, rgba(244,180,0,0.35), rgba(167,139,250,0.35));
+        border: 1px solid rgba(255,255,255,0.10);
+        flex: 0 0 36px;
+        margin-top: 2px;
+    }}
+
+    .mm-bubble {{
+        border-radius: 18px;
+        padding: 14px 16px;
+        border: 1px solid rgba(255,255,255,0.10);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+        line-height: 1.55;
+        font-size: 15px;
+        max-width: min(720px, 88%);
+        backdrop-filter: blur(6px);
+    }}
+
+    .mm-assistant-bubble {{
+        background: rgba(255,255,255,0.08) !important;
+        color: rgba(255,255,255,0.94) !important;
+    }}
+
+    .mm-user-bubble {{
+        background: rgba(17, 24, 39, 0.68) !important;
+        color: rgba(255,255,255,0.96) !important;
+    }}
+
+    /* Markdown inside bubbles */
+    .mm-bubble p {{ margin: 0 0 10px 0; }}
+    .mm-bubble p:last-child {{ margin-bottom: 0; }}
+
+    .mm-bubble ul, .mm-bubble ol {{
+        margin: 8px 0 8px 22px;
+        padding: 0;
+    }}
+    .mm-bubble li {{ margin: 4px 0; }}
+    .mm-bubble strong {{ font-weight: 800; }}
+
+    .mm-bubble pre {{
+        margin: 10px 0;
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: rgba(0,0,0,0.30);
+        border: 1px solid rgba(255,255,255,0.10);
+        overflow-x: auto;
+    }}
+    .mm-bubble code {{
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }}
+
+    /* Compact divider for recommendations */
+    .mm-rec-divider {{
+        margin: 10px 0;
+        border: none;
+        height: 1px;
+        background: rgba(255,255,255,0.10);
+    }}
+
+    /* Hide Streamlit chat action buttons if any appear */
+    [data-testid="stChatMessage"] [data-testid="stChatMessageActionButtons"],
+    [data-testid="stChatMessage"] [data-testid="stChatMessageActionButton"],
+    [data-testid="stChatMessage"] [data-testid^="stChatMessageAction"] {{
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
 )
-
 
 # ---------- AUTH SCREEN (new login page) ----------
 if not st.session_state.logged_in:
@@ -467,10 +652,8 @@ if not st.session_state.logged_in:
                     st.session_state.user_info = user
                     st.session_state.page = "chat"
 
-                    # profile completion flag only (no banner)
                     refresh_onboarding_flag()
 
-                    # threads
                     threads = auth_service.get_user_threads(username)
                     if threads:
                         st.session_state.current_thread_id = threads[0]["id"]
@@ -498,7 +681,7 @@ if not st.session_state.logged_in:
                     st.session_state.user_info = {"username": new_user, "name": new_name}
                     st.session_state.page = "chat"
 
-                    st.session_state.show_onboarding = True  # they can do it later via Profile (Q&A)
+                    st.session_state.show_onboarding = True
 
                     st.session_state.messages = []
                     new_id = auth_service.create_new_thread(new_user)
@@ -573,7 +756,6 @@ with st.sidebar:
     username = st.session_state.user_info["username"]
     user_name = st.session_state.user_info["name"]
 
-    # PROFILE POPOVER (Favorites + Logout + Profile Q&A like before)
     with st.popover("Profile", use_container_width=True):
         st.markdown(f"**Hi, {user_name}!**")
         if st.button("Favorites", use_container_width=True, key="pop_favs"):
@@ -587,7 +769,6 @@ with st.sidebar:
 
     st.markdown("<hr class='mm-divider'/>", unsafe_allow_html=True)
 
-    # NAVIGATION (keep clean)
     st.markdown('<div class="mm-section-title">Navigation</div>', unsafe_allow_html=True)
     st.markdown('<div class="mm-nav">', unsafe_allow_html=True)
 
@@ -606,7 +787,6 @@ with st.sidebar:
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("<hr class='mm-divider'/>", unsafe_allow_html=True)
 
-    # CONVERSATIONS (ONLY ON CHAT PAGE)
     if st.session_state.page == "chat":
         st.markdown('<div class="mm-section-title">Conversations</div>', unsafe_allow_html=True)
 
@@ -695,7 +875,6 @@ selected = st.session_state.page
 
 if selected == "profile":
     refresh_onboarding_flag()
-    # Fetch profile ONCE at the top so we have fresh data for both tabs
     current_profile = auth_service.get_profile(username) or {}
 
     if st.session_state.show_onboarding:
@@ -713,15 +892,10 @@ if selected == "profile":
 
     with tab1:
         st.info("Upload your CV (PDF). You can upload multiple files to build a comprehensive profile.")
-        
-        # --- 1. Display Existing CVs ---
-        # We store list of files in 'cv_documents'. 
-        # Structure: [{'name': 'filename', 'text': '...', 'date': '...'}]
+
         saved_docs = current_profile.get("cv_documents", [])
-        
-        # If legacy 'cv_text' exists but 'cv_documents' is empty, user had a previous upload
         if not saved_docs and current_profile.get("cv_text"):
-             saved_docs = [{"name": "Previous Upload", "text": current_profile["cv_text"], "date": "Unknown"}]
+            saved_docs = [{"name": "Previous Upload", "text": current_profile["cv_text"], "date": "Unknown"}]
 
         if saved_docs:
             st.write("### 📂 Uploaded Documents")
@@ -732,16 +906,9 @@ if selected == "profile":
                         st.write(f"📄 **{doc.get('name', 'Untitled')}**")
                         st.caption(f"Uploaded: {doc.get('date', 'Unknown')}")
                     with c2:
-                        # DELETE BUTTON
                         if st.button("🗑️", key=f"del_cv_{i}"):
-                            # Remove this doc from list
                             saved_docs.pop(i)
-                            
-                            # Re-construct full text for the AI
-                            # The AI reads 'cv_text', so we join all remaining docs
                             full_text = "\n\n".join([d["text"] for d in saved_docs])
-                            
-                            # Update Profile
                             auth_service.update_profile(username, {
                                 "cv_documents": saved_docs,
                                 "cv_text": full_text
@@ -749,7 +916,6 @@ if selected == "profile":
                             st.rerun()
             st.divider()
 
-        # --- 2. Upload New CV ---
         uploaded_file = st.file_uploader("Add a PDF file", type="pdf")
 
         if uploaded_file is not None:
@@ -758,32 +924,26 @@ if selected == "profile":
                     text = extract_text_from_pdf(uploaded_file)
 
                 if text:
-                    # Create new doc object
                     new_doc = {
                         "name": uploaded_file.name,
                         "text": text,
                         "date": datetime.now().strftime("%Y-%m-%d %H:%M")
                     }
-                    
-                    # Add to existing list
+
                     updated_docs = saved_docs + [new_doc]
-                    
-                    # Combine all texts for the AI
                     combined_text = "\n\n".join([d["text"] for d in updated_docs])
-                    
+
                     success, msg = auth_service.update_profile(
                         username,
                         {
                             "cv_documents": updated_docs,
-                            "cv_text": combined_text, # AI uses this
+                            "cv_text": combined_text,
                             "onboarding_completed": True
                         },
                     )
                     if success:
                         st.success(f"'{uploaded_file.name}' uploaded successfully!")
-                        
-                        # --- TRIGGER CHAT MESSAGE START ---
-                        # Ensure we have a thread to post to
+
                         if st.session_state.current_thread_id is None:
                             new_id = auth_service.create_new_thread(username)
                             st.session_state.current_thread_id = new_id
@@ -794,12 +954,9 @@ if selected == "profile":
                             "Now that I know your background, skills, and experience, I can provide much better recommendations. "
                             "Try asking: **'Based on my CV, which Master's programs fit me best?'**"
                         )
-                        
-                        # Add to local state
+
                         st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
-                        # Save to DB so it persists
                         auth_service.save_message(st.session_state.current_thread_id, "assistant", welcome_msg)
-                        # --- TRIGGER CHAT MESSAGE END ---
 
                         st.session_state.show_onboarding = False
                         time.sleep(1.0)
@@ -816,7 +973,6 @@ if selected == "profile":
             with col1:
                 bg = st.text_input("Undergraduate Major", value=current_profile.get("background", ""))
                 gpa = st.number_input("GPA (0-20)", value=float(current_profile.get("gpa", 0.0)))
-                # --- NEW INPUT ADDED HERE ---
                 city = st.text_input("City of Preference", value=current_profile.get("city", ""))
 
             with col2:
@@ -838,13 +994,12 @@ if selected == "profile":
                 profile_data = {
                     "background": bg,
                     "gpa": gpa,
-                    "city": city, # Saving the city
+                    "city": city,
                     "budget": budget,
                     "experience": exp,
                     "interests": interests,
                     "onboarding_completed": True,
                 }
-                # Preserve CV data if it exists
                 if "cv_text" in current_profile:
                     profile_data["cv_text"] = current_profile["cv_text"]
                 if "cv_documents" in current_profile:
@@ -877,14 +1032,13 @@ elif selected == "chat":
             st.session_state.pop("langfuse", None)
             st.rerun()
 
-    # --- 1. RENDER HISTORY (TEXT + TABLES) ---
+    # --- 1. RENDER HISTORY (CUSTOM BUBBLES + TABLES) ---
+    st.markdown('<div class="mm-chat-container">', unsafe_allow_html=True)
     for i, message in enumerate(st.session_state.messages):
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            
-            # CHECK IF THIS MESSAGE HAS DATA ATTACHED
-            if message.get("data"):
-                render_recommendations(message["data"], msg_index=i)
+        render_chat_bubble(message["role"], message["content"])
+        if message.get("data"):
+            render_recommendations(message["data"], msg_index=i)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # --- 2. INPUT HANDLING ---
     prompt = st.chat_input("Ask me about master's programs...")
@@ -892,10 +1046,6 @@ elif selected == "chat":
     if prompt:
         # Append User Message
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # Save to DB (User)
         auth_service.save_message(st.session_state.current_thread_id, "user", prompt)
 
         # Rename thread if needed
@@ -903,65 +1053,58 @@ elif selected == "chat":
             new_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
             auth_service.update_thread_title(st.session_state.current_thread_id, new_title)
 
+        # Show user bubble immediately
+        st.markdown('<div class="mm-chat-container">', unsafe_allow_html=True)
+        render_chat_bubble("user", prompt)
+
+        assistant_placeholder = st.empty()
+
         # --- 3. GENERATE RESPONSE ---
-        with st.chat_message("assistant"):
-            response = ""
-            found_data = [] # Holder for the programs for THIS turn
-            
-            with st.spinner("Thinking..."):
-                try:
-                    # --- FIX: Sanitize history ---
-                    # Create a clean version of history without the 'data' key 
-                    # so the backend Pydantic validation doesn't crash.
-                    clean_history = [
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state.messages[:-1]
-                    ]
+        response = ""
+        found_data = []
 
-                    payload = {
-                        "username": username,
-                        "message": prompt,
-                        "thread_id": st.session_state.current_thread_id,
-                        "history": clean_history, 
-                    }
-                    api_response = requests.post(CHAT_ENDPOINT, json=payload, timeout=120)
+        with st.spinner("Thinking..."):
+            try:
+                clean_history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages[:-1]
+                ]
+                payload = {
+                    "username": username,
+                    "message": prompt,
+                    "thread_id": st.session_state.current_thread_id,
+                    "history": clean_history,
+                }
+                api_response = requests.post(CHAT_ENDPOINT, json=payload, timeout=120)
 
-                    if api_response.status_code == 200:
-                        data = api_response.json()
-                        response = data.get("response", "")
-                        found_data = data.get("data", []) or [] # Capture data here
-                    else:
-                        response = f"⚠️ API Error: {api_response.text}"
+                if api_response.status_code == 200:
+                    data = api_response.json()
+                    response = data.get("response", "")
+                    found_data = data.get("data", []) or []
+                else:
+                    response = f"⚠️ API Error: {api_response.text}"
 
-                except Exception as e:
-                    response = f"❌ Error: {e}"
+            except Exception as e:
+                response = f"❌ Error: {e}"
 
-            # Stream text
-            def stream_data():
-                for word in response.split(" "):
-                    yield word + " "
-                    time.sleep(0.02)
-            
-            st.write_stream(stream_data)
+        # Stream assistant bubble (works with markdown too)
+        partial = ""
+        words = response.split(" ")
+        for idx, w in enumerate(words):
+            partial += w + " "
+            if idx % 4 == 0 or idx == len(words) - 1:
+                render_assistant_stream_placeholder(assistant_placeholder, partial.strip())
+                time.sleep(0.01)
 
-            # Render Table immediately for the NEW response
-            if found_data:
-                # We use len(messages) as index because we are about to append it
-                render_recommendations(found_data, msg_index=len(st.session_state.messages))
+        # Render table for new response
+        if found_data:
+            render_recommendations(found_data, msg_index=len(st.session_state.messages))
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
         # --- 4. SAVE TO STATE & DB ---
-        # Crucial: We attach 'data': found_data to the message object!
-        new_msg_obj = {
-            "role": "assistant", 
-            "content": response, 
-            "data": found_data
-        }
-        st.session_state.messages.append(new_msg_obj)
-        
-        # Note: auth_service.save_message usually only saves text. 
-        # If you refresh the page, the tables might disappear unless 
-        # your backend logic also persists the 'data' field.
-        auth_service.save_message(st.session_state.current_thread_id, "assistant", response) 
+        st.session_state.messages.append({"role": "assistant", "content": response, "data": found_data})
+        auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
 
 elif selected == "favorites":
     st.markdown("<h2 style='text-align: center; color: #F4B400;'>My Favorite Programs ❤️</h2>", unsafe_allow_html=True)
@@ -978,11 +1121,9 @@ elif selected == "favorites":
                 with col1:
                     st.write(f"📍 **Location:** {f.get('location', f.get('Location', 'N/A'))}")
                     st.write(f"💰 **Tuition:** {f.get('tuition', f.get('Tuition Fee', 'N/A'))}")
-                    
-                    # --- Added Description Here ---
+
                     about_text = f.get("about", "No description available.")
                     st.markdown(f"**📖 About:**\n{about_text}")
-                    # ------------------------------
 
                     st.caption(f"Saved on: {f.get('saved_at', 'Unknown date')}")
 
