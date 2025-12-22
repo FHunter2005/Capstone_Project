@@ -29,6 +29,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         )
     return username
 
+# --- Pydantic Models ---
 class ChatRequest(BaseModel):
     username: str
     message: str
@@ -38,6 +39,13 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     data: Optional[List[Dict[str, Any]]] = None 
+
+# ✅ ADDED: Missing LoginRequest Model
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+# --- Endpoints ---
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
@@ -51,50 +59,38 @@ async def chat_endpoint(
         # 1. Get User Profile Data
         user_profile = auth_service.get_profile(request.username)
         
-        # 2. OPTIMIZED CONTEXT: Check for cached summary
+        # 2. Check for cached summary
         user_persona = user_profile.get("summary") 
         
-        # If we have profile data but NO summary, generate it now (Lazy Loading)
+        # Lazy Loading Summary
         if not user_persona and user_profile:
              cv_text = user_profile.get("cv_text", "")
-             
-             # Only generate if there is actual data to summarize
              if cv_text or user_profile.get("background"):
-                 print("⚡ Generating User Persona Summary (One-time cost)...")
-                 
                  manual_data = {
                      "background": user_profile.get("background"),
                      "budget": user_profile.get("budget"),
                      "interests": user_profile.get("interests"),
                      "gpa": user_profile.get("gpa")
                  }
-                 
                  user_persona = generate_persona_summary(cv_text, manual_data)
-                 
-                 # Save it so we don't do this again next time
                  if user_persona:
                      auth_service.save_profile_summary(request.username, user_persona)
 
-        # 3. Call the Prompt Router
-        # (Optional: You could add logic here to detect intent from request.message)
-        current_intent = "general" 
-        
+        # 3. System Instruction
         system_instruction = get_system_instruction(
             user_context=user_persona, 
-            intent=current_intent
+            intent="general"
         )
 
-        # 4. Prepare History (Clean, no system injection in messages)
+        # 4. History & AI Call
         history_for_ai = request.history[-15:] if request.history else []
-
-        # 5. Run AI with Dynamic System Instruction
         client = AIClient(
             history_messages=history_for_ai,
             system_instruction=system_instruction
         )
         ai_response_text = client.send_message_to_agent(request.message)
 
-        # 6. Extract Data from Tool Calls
+        # 5. Extract Tool Data
         found_programs = []
         if hasattr(client, 'last_tool_results') and client.last_tool_results:
             found_programs = client.last_tool_results
@@ -102,7 +98,7 @@ async def chat_endpoint(
                 if "_id" in doc:
                     doc["_id"] = str(doc["_id"])
 
-        # 7. Save to DB
+        # 6. Save Logs
         auth_service.save_message(request.thread_id, "user", request.message)
         auth_service.save_message(request.thread_id, "assistant", ai_response_text)
 
@@ -113,3 +109,22 @@ async def chat_endpoint(
     except Exception as e:
         print(f"❌ API Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/login")
+def login(creds: LoginRequest):
+    # This keeps the logic on the server side
+    user = auth_service.login_user(creds.username, creds.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    token = auth_service.create_access_token({"sub": user["username"]})
+    
+    return {
+        "token": token, 
+        "name": user.get("name"), 
+        "username": user.get("username")
+    }
+
+@app.get("/history/{thread_id}")
+def get_history(thread_id: str, current_user: str = Depends(get_current_user)):
+    return auth_service.load_thread_messages(thread_id)

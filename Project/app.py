@@ -47,7 +47,7 @@ LOGIN_HERO_PATH = os.path.join(BASE_DIR, "extras/photos/capa.jpg")
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000")
 CHAT_ENDPOINT = f"{BACKEND_BASE_URL.rstrip('/')}/chat"
 
-# ---------- Page Config ----------
+# ---------- Page Config ----------user =
 st.set_page_config(
     page_title="MasterMatch",
     page_icon=str(LOGO_PATH),
@@ -766,35 +766,48 @@ if not st.session_state.logged_in:
             password = st.text_input("Password", type="password", key="login_pass", placeholder="••••••••••")
 
             if st.button("Sign in", use_container_width=True, key="login_btn"):
-                user = auth_service.login_user(username, password)
-                if user:
-                    # token is optional (don't crash UI)
-                    try:
-                        token = auth_service.create_access_token(data={"sub": username})
-                        st.session_state.auth_token = token
-                    except Exception:
-                        st.session_state.auth_token = ""
 
-                    st.session_state.logged_in = True
-                    st.session_state.user_info = user
+                try:
+                    resp = requests.post(f"{BACKEND_BASE_URL}/login", json={"username": username, "password": password})
+                    
+                    if resp.status_code == 200:
+                        data = resp.json()
 
-                    refresh_onboarding_flag()
-                    st.session_state.page = "start" if st.session_state.show_onboarding else "chat"
+                        st.session_state.auth_token = data["token"]
+                        st.session_state.logged_in = True
+                        st.session_state.user_info = data 
 
-                    threads = auth_service.get_user_threads(username)
-                    if threads:
-                        st.session_state.current_thread_id = threads[0]["id"]
-                        st.session_state.messages = auth_service.load_thread_messages(st.session_state.current_thread_id)
+                        refresh_onboarding_flag()
+                        st.session_state.page = "start" if st.session_state.show_onboarding else "chat"
+
+                        threads = auth_service.get_user_threads(username)
+                        if threads:
+                            st.session_state.current_thread_id = threads[0]["id"]
+                            st.session_state.messages = auth_service.load_thread_messages(st.session_state.current_thread_id)
+
+                            hist_resp = requests.get(
+                                f"{BACKEND_BASE_URL}/history/{st.session_state.current_thread_id}",
+                                headers={"Authorization": f"Bearer {data['token']}"}
+                            )
+
+                            if hist_resp.status_code == 200:
+                                st.session_state.messages = hist_resp.json()
+
+                            else:
+                                st.session_state.messages = []
+                        else:
+                            new_id = auth_service.create_new_thread(username)
+                            st.session_state.current_thread_id = new_id
+                            st.session_state.messages = []
+                    
+                    elif resp.status_code == 401:
+                        st.error("Incorrect credentials.")
                     else:
-                        new_id = auth_service.create_new_thread(username)
-                        st.session_state.current_thread_id = new_id
-                        st.session_state.messages = []
-
-                    st.session_state.pop("agent_client", None)
-                    st.session_state.pop("langfuse", None)
-                    st.rerun()
-                else:
-                    st.error("Incorrect credentials.")
+                        st.error(f"Login failed: {resp.text}")
+                
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+            
 
         with tab2:
             new_user = st.text_input("New Username", key="signup_user", placeholder="Choose a username")
