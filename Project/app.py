@@ -349,7 +349,7 @@ def render_recommendations(programs, msg_index):
 # Markdown renderer (safe: HTML disabled). Falls back to basic escaping if missing.
 MD_RENDERER = None
 if MarkdownIt is not None:
-    MD_RENDERER = MarkdownIt("commonmark", {"html": False, "breaks": True})
+    MD_RENDERER = MarkdownIt("commonmark", {"html": False, "breaks": True}).enable("table")
 
 
 def _to_bubble_html(text: str) -> str:
