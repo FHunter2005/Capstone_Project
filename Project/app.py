@@ -8,6 +8,7 @@ import json
 import os
 import time
 import requests
+from datetime import datetime
 
 import streamlit as st
 from streamlit_lottie import st_lottie
@@ -148,6 +149,55 @@ def refresh_onboarding_flag():
         st.session_state.show_onboarding = not profile.get("onboarding_completed", False)
     except Exception:
         st.session_state.show_onboarding = False
+
+def render_recommendations(programs, msg_index):
+    """
+    Renders the list of programs for a specific message.
+    msg_index is used to ensure button keys are unique per message.
+    """
+    if not programs:
+        return
+
+    # Create a unique expander for this specific message
+    with st.expander(f"👇 Found {len(programs)} Programs", expanded=True):
+        username = st.session_state.user_info["username"]
+        current_favs = auth_service.get_user_favorites(username)
+        saved_identifiers = {(f.get("master"), f.get("university")) for f in current_favs}
+
+        for i, prog in enumerate(programs):
+            with st.container():
+                c1, c2 = st.columns([4, 1])
+                master_name = prog.get("master", "Unknown Program")
+                uni_name = prog.get("university", "Unknown University")
+
+                with c1:
+                    st.markdown(f"**{master_name}** at *{uni_name}*")
+                    # Optional: Add location/tuition here if available
+                    loc = prog.get("Location") or prog.get("location")
+                    if loc: st.caption(f"📍 {loc}")
+
+                with c2:
+                    unique_id = str(prog.get("_id", i))
+                    # KEY FIX: The key includes the message index so buttons don't conflict
+                    btn_key = f"save_{msg_index}_{i}_{unique_id}"
+
+                    if (master_name, uni_name) in saved_identifiers:
+                        st.button("✅ Saved", key=btn_key, disabled=True)
+                    else:
+                        if st.button("❤️ Save", key=btn_key):
+                            clean_prog = prog.copy()
+                            # Normalize keys
+                            clean_prog["Location"] = prog.get("Location") or prog.get("location") or "N/A"
+                            clean_prog["Tuition Fee"] = prog.get("Tuition Fee") or prog.get("tuition") or "N/A"
+
+                            success, msg = auth_service.add_favorite(username, clean_prog)
+                            if success:
+                                st.toast(f"Saved: {master_name}", icon="✅")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.toast(msg, icon="ℹ️")
+            st.divider()
 
 
 # Optional tracing if you later switch to AIClient direct calls
@@ -645,6 +695,8 @@ selected = st.session_state.page
 
 if selected == "profile":
     refresh_onboarding_flag()
+    # Fetch profile ONCE at the top so we have fresh data for both tabs
+    current_profile = auth_service.get_profile(username) or {}
 
     if st.session_state.show_onboarding:
         st.markdown("<br><br>", unsafe_allow_html=True)
@@ -660,8 +712,45 @@ if selected == "profile":
     tab1, tab2 = st.tabs(["📄 Upload CV (Fast)", "✍️ Manual Q&A (Detailed)"])
 
     with tab1:
-        st.info("Upload your CV (PDF) and we will automatically extract your details.")
-        uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+        st.info("Upload your CV (PDF). You can upload multiple files to build a comprehensive profile.")
+        
+        # --- 1. Display Existing CVs ---
+        # We store list of files in 'cv_documents'. 
+        # Structure: [{'name': 'filename', 'text': '...', 'date': '...'}]
+        saved_docs = current_profile.get("cv_documents", [])
+        
+        # If legacy 'cv_text' exists but 'cv_documents' is empty, user had a previous upload
+        if not saved_docs and current_profile.get("cv_text"):
+             saved_docs = [{"name": "Previous Upload", "text": current_profile["cv_text"], "date": "Unknown"}]
+
+        if saved_docs:
+            st.write("### 📂 Uploaded Documents")
+            for i, doc in enumerate(saved_docs):
+                with st.container(border=True):
+                    c1, c2 = st.columns([0.85, 0.15])
+                    with c1:
+                        st.write(f"📄 **{doc.get('name', 'Untitled')}**")
+                        st.caption(f"Uploaded: {doc.get('date', 'Unknown')}")
+                    with c2:
+                        # DELETE BUTTON
+                        if st.button("🗑️", key=f"del_cv_{i}"):
+                            # Remove this doc from list
+                            saved_docs.pop(i)
+                            
+                            # Re-construct full text for the AI
+                            # The AI reads 'cv_text', so we join all remaining docs
+                            full_text = "\n\n".join([d["text"] for d in saved_docs])
+                            
+                            # Update Profile
+                            auth_service.update_profile(username, {
+                                "cv_documents": saved_docs,
+                                "cv_text": full_text
+                            })
+                            st.rerun()
+            st.divider()
+
+        # --- 2. Upload New CV ---
+        uploaded_file = st.file_uploader("Add a PDF file", type="pdf")
 
         if uploaded_file is not None:
             if st.button("Analyze CV & Save", use_container_width=True):
@@ -669,14 +758,51 @@ if selected == "profile":
                     text = extract_text_from_pdf(uploaded_file)
 
                 if text:
+                    # Create new doc object
+                    new_doc = {
+                        "name": uploaded_file.name,
+                        "text": text,
+                        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    }
+                    
+                    # Add to existing list
+                    updated_docs = saved_docs + [new_doc]
+                    
+                    # Combine all texts for the AI
+                    combined_text = "\n\n".join([d["text"] for d in updated_docs])
+                    
                     success, msg = auth_service.update_profile(
                         username,
-                        {"cv_text": text, "onboarding_completed": True},
+                        {
+                            "cv_documents": updated_docs,
+                            "cv_text": combined_text, # AI uses this
+                            "onboarding_completed": True
+                        },
                     )
                     if success:
-                        st.success("CV uploaded successfully!")
+                        st.success(f"'{uploaded_file.name}' uploaded successfully!")
+                        
+                        # --- TRIGGER CHAT MESSAGE START ---
+                        # Ensure we have a thread to post to
+                        if st.session_state.current_thread_id is None:
+                            new_id = auth_service.create_new_thread(username)
+                            st.session_state.current_thread_id = new_id
+                            st.session_state.messages = []
+
+                        welcome_msg = (
+                            f"I've received your CV (**{uploaded_file.name}**)! 📄\n\n"
+                            "Now that I know your background, skills, and experience, I can provide much better recommendations. "
+                            "Try asking: **'Based on my CV, which Master's programs fit me best?'**"
+                        )
+                        
+                        # Add to local state
+                        st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
+                        # Save to DB so it persists
+                        auth_service.save_message(st.session_state.current_thread_id, "assistant", welcome_msg)
+                        # --- TRIGGER CHAT MESSAGE END ---
+
                         st.session_state.show_onboarding = False
-                        time.sleep(0.6)
+                        time.sleep(1.0)
                         st.session_state.page = "chat"
                         st.rerun()
                     else:
@@ -685,13 +811,14 @@ if selected == "profile":
                     st.error("Could not read text from this PDF.")
 
     with tab2:
-        current_profile = auth_service.get_profile(username) or {}
-
         with st.form("profile_form"):
             col1, col2 = st.columns(2)
             with col1:
                 bg = st.text_input("Undergraduate Major", value=current_profile.get("background", ""))
                 gpa = st.number_input("GPA (0-20)", value=float(current_profile.get("gpa", 0.0)))
+                # --- NEW INPUT ADDED HERE ---
+                city = st.text_input("City of Preference", value=current_profile.get("city", ""))
+
             with col2:
                 budget = st.number_input("Max Budget (€)", value=int(current_profile.get("budget", 0)))
                 exp = st.selectbox(
@@ -711,13 +838,17 @@ if selected == "profile":
                 profile_data = {
                     "background": bg,
                     "gpa": gpa,
+                    "city": city, # Saving the city
                     "budget": budget,
                     "experience": exp,
                     "interests": interests,
                     "onboarding_completed": True,
                 }
+                # Preserve CV data if it exists
                 if "cv_text" in current_profile:
                     profile_data["cv_text"] = current_profile["cv_text"]
+                if "cv_documents" in current_profile:
+                    profile_data["cv_documents"] = current_profile["cv_documents"]
 
                 success, msg = auth_service.update_profile(username, profile_data)
                 if success:
@@ -746,93 +877,91 @@ elif selected == "chat":
             st.session_state.pop("langfuse", None)
             st.rerun()
 
-    for message in st.session_state.messages:
+    # --- 1. RENDER HISTORY (TEXT + TABLES) ---
+    for i, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            
+            # CHECK IF THIS MESSAGE HAS DATA ATTACHED
+            if message.get("data"):
+                render_recommendations(message["data"], msg_index=i)
 
+    # --- 2. INPUT HANDLING ---
     prompt = st.chat_input("Ask me about master's programs...")
 
     if prompt:
+        # Append User Message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
+        
+        # Save to DB (User)
         auth_service.save_message(st.session_state.current_thread_id, "user", prompt)
 
-        # rename thread once on first user message
+        # Rename thread if needed
         if len([m for m in st.session_state.messages if m["role"] == "user"]) == 1:
             new_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
             auth_service.update_thread_title(st.session_state.current_thread_id, new_title)
 
+        # --- 3. GENERATE RESPONSE ---
         with st.chat_message("assistant"):
             response = ""
+            found_data = [] # Holder for the programs for THIS turn
+            
             with st.spinner("Thinking..."):
                 try:
+                    # --- FIX: Sanitize history ---
+                    # Create a clean version of history without the 'data' key 
+                    # so the backend Pydantic validation doesn't crash.
+                    clean_history = [
+                        {"role": m["role"], "content": m["content"]}
+                        for m in st.session_state.messages[:-1]
+                    ]
+
                     payload = {
                         "username": username,
                         "message": prompt,
                         "thread_id": st.session_state.current_thread_id,
-                        "history": st.session_state.messages[:-1],
+                        "history": clean_history, 
                     }
                     api_response = requests.post(CHAT_ENDPOINT, json=payload, timeout=120)
 
                     if api_response.status_code == 200:
                         data = api_response.json()
                         response = data.get("response", "")
-
-                        found_data = data.get("data", []) or []
-                        if found_data:
-                            st.session_state.last_recommended_masters = found_data
+                        found_data = data.get("data", []) or [] # Capture data here
                     else:
                         response = f"⚠️ API Error: {api_response.text}"
 
                 except Exception as e:
                     response = f"❌ Error: {e}"
 
+            # Stream text
             def stream_data():
                 for word in response.split(" "):
                     yield word + " "
                     time.sleep(0.02)
-
+            
             st.write_stream(stream_data)
 
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
+            # Render Table immediately for the NEW response
+            if found_data:
+                # We use len(messages) as index because we are about to append it
+                render_recommendations(found_data, msg_index=len(st.session_state.messages))
 
-    # Found programs
-    if st.session_state.last_recommended_masters:
-        st.markdown("---")
-        with st.expander("👇 **Found Programs (Click to Expand/Collapse)**", expanded=True):
-            current_favs = auth_service.get_user_favorites(username)
-            saved_identifiers = {(f.get("master"), f.get("university")) for f in current_favs}
-
-            for i, prog in enumerate(st.session_state.last_recommended_masters):
-                with st.container():
-                    c1, c2 = st.columns([4, 1])
-                    master_name = prog.get("master", "Unknown Program")
-                    uni_name = prog.get("university", "Unknown University")
-
-                    with c1:
-                        st.markdown(f"**{master_name}** at *{uni_name}*")
-
-                    with c2:
-                        unique_id = str(prog.get("_id", i))
-                        btn_key = f"save_{unique_id}_{i}"
-
-                        if (master_name, uni_name) in saved_identifiers:
-                            st.button("✅ Saved", key=btn_key, disabled=True)
-                        else:
-                            if st.button("❤️ Save", key=btn_key):
-                                clean_prog = prog.copy()
-                                clean_prog["Location"] = prog.get("Location") or prog.get("location") or "N/A"
-                                clean_prog["Tuition Fee"] = prog.get("Tuition Fee") or prog.get("tuition") or "N/A"
-
-                                success, msg = auth_service.add_favorite(username, clean_prog)
-                                if success:
-                                    st.toast(f"Saved: {master_name} ({uni_name})", icon="✅")
-                                    time.sleep(0.6)
-                                    st.rerun()
-                                else:
-                                    st.toast(msg, icon="ℹ️")
+        # --- 4. SAVE TO STATE & DB ---
+        # Crucial: We attach 'data': found_data to the message object!
+        new_msg_obj = {
+            "role": "assistant", 
+            "content": response, 
+            "data": found_data
+        }
+        st.session_state.messages.append(new_msg_obj)
+        
+        # Note: auth_service.save_message usually only saves text. 
+        # If you refresh the page, the tables might disappear unless 
+        # your backend logic also persists the 'data' field.
+        auth_service.save_message(st.session_state.current_thread_id, "assistant", response) 
 
 elif selected == "favorites":
     st.markdown("<h2 style='text-align: center; color: #F4B400;'>My Favorite Programs ❤️</h2>", unsafe_allow_html=True)
@@ -849,6 +978,12 @@ elif selected == "favorites":
                 with col1:
                     st.write(f"📍 **Location:** {f.get('location', f.get('Location', 'N/A'))}")
                     st.write(f"💰 **Tuition:** {f.get('tuition', f.get('Tuition Fee', 'N/A'))}")
+                    
+                    # --- Added Description Here ---
+                    about_text = f.get("about", "No description available.")
+                    st.markdown(f"**📖 About:**\n{about_text}")
+                    # ------------------------------
+
                     st.caption(f"Saved on: {f.get('saved_at', 'Unknown date')}")
 
                 with col2:

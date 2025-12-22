@@ -57,6 +57,7 @@ class AuthService:
             "university": master_data.get("university"),
             "location": master_data.get("Location"),
             "tuition": master_data.get("Tuition Fee"),
+            "about": master_data.get("about"),
             "saved_at": datetime.now(),
         }
 
