@@ -69,8 +69,6 @@ def init_state():
         st.session_state.last_recommended_masters = []
     if "current_thread_id" not in st.session_state:
         st.session_state.current_thread_id = None
-    if "auth_token" not in st.session_state:
-        st.session_state.auth_token = ""
 
     # onboarding state
     if "show_onboarding" not in st.session_state:
@@ -259,7 +257,6 @@ def do_logout():
     st.session_state.last_recommended_masters = []
     st.session_state.current_thread_id = None
     st.session_state.show_onboarding = False
-    st.session_state.auth_token = ""
     st.session_state.profile_entry = "cv"
 
     st.session_state.pop("agent_client", None)
@@ -767,15 +764,14 @@ if not st.session_state.logged_in:
 
             if st.button("Sign in", use_container_width=True, key="login_btn"):
 
+               
                 try:
-                    resp = requests.post(f"{BACKEND_BASE_URL}/login", json={"username": username, "password": password})
+                    # 1. Use local AuthService directly instead of API
+                    user = auth_service.login_user(username, password)
                     
-                    if resp.status_code == 200:
-                        data = resp.json()
-
-                        st.session_state.auth_token = data["token"]
+                    if user:
                         st.session_state.logged_in = True
-                        st.session_state.user_info = data 
+                        st.session_state.user_info = {"username": username, "name": user.get("name", "")}
 
                         refresh_onboarding_flag()
                         st.session_state.page = "start" if st.session_state.show_onboarding else "chat"
@@ -783,16 +779,16 @@ if not st.session_state.logged_in:
                         threads = auth_service.get_user_threads(username)
                         if threads:
                             st.session_state.current_thread_id = threads[0]["id"]
+                            # Load messages directly from DB (faster) or via API without headers
                             st.session_state.messages = auth_service.load_thread_messages(st.session_state.current_thread_id)
 
+                            # If you prefer keeping the API call for history, use this (without headers):
                             hist_resp = requests.get(
-                                f"{BACKEND_BASE_URL}/history/{st.session_state.current_thread_id}",
-                                headers={"Authorization": f"Bearer {data['token']}"}
+                                f"{BACKEND_BASE_URL}/history/{st.session_state.current_thread_id}"
                             )
 
                             if hist_resp.status_code == 200:
                                 st.session_state.messages = hist_resp.json()
-
                             else:
                                 st.session_state.messages = []
                         else:
@@ -800,13 +796,11 @@ if not st.session_state.logged_in:
                             st.session_state.current_thread_id = new_id
                             st.session_state.messages = []
                     
-                    elif resp.status_code == 401:
-                        st.error("Incorrect credentials.")
                     else:
-                        st.error(f"Login failed: {resp.text}")
+                        st.error("Incorrect credentials.")
                 
                 except Exception as e:
-                    st.error(f"Connection error: {e}")
+                    st.error(f"Error: {e}")
             
 
         with tab2:
@@ -816,13 +810,8 @@ if not st.session_state.logged_in:
 
             if st.button("Create account", use_container_width=True, key="signup_btn"):
                 success, msg = auth_service.register_user(new_user, new_name, new_pass)
-                if success:
-                    try:
-                        token = auth_service.create_access_token(data={"sub": new_user})
-                        st.session_state.auth_token = token
-                    except Exception:
-                        st.session_state.auth_token = ""
 
+                if success:
                     st.session_state.logged_in = True
                     st.session_state.user_info = {"username": new_user, "name": new_name}
 
@@ -1283,8 +1272,6 @@ elif selected == "profile":
 elif selected == "chat":
     ensure_thread()
     
-    # --- NEW: CV Warning Balloon ---
-    # Check if the user has uploaded a CV (documents or text)
     username = st.session_state.user_info["username"]
     current_profile = auth_service.get_profile(username) or {}
     has_cv = current_profile.get("cv_documents") or current_profile.get("cv_text")
@@ -1336,7 +1323,6 @@ elif selected == "chat":
             try:
                 clean_history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
 
-                headers = {"Authorization": f"Bearer {st.session_state.get('auth_token', '')}"}
 
                 payload = {
                     "username": username,
@@ -1345,7 +1331,7 @@ elif selected == "chat":
                     "history": clean_history,
                 }
 
-                api_response = requests.post(CHAT_ENDPOINT, json=payload, headers=headers, timeout=120)
+                api_response = requests.post(CHAT_ENDPOINT, json=payload, timeout=120)
 
                 if api_response.status_code == 200:
                     data = api_response.json()
@@ -1374,7 +1360,6 @@ elif selected == "chat":
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.session_state.messages.append({"role": "assistant", "content": response, "data": found_data})
-        #auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
 
 
 elif selected == "favorites":
