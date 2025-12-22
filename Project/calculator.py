@@ -125,22 +125,25 @@ def render_price_calculator():
         with st.form("calc", border=False):
             st.markdown("### Academic Investment")
             col1, col2 = st.columns(2)
-            tuition = col1.number_input("Total Tuition Program Cost (€)", 0, 200000, 0, 500)
-            fees = col2.number_input("Mandatory Fees / Books / Insurance (€)", 0, 10000, 0, 50)
+            # Constraints (min/max/default/step) removed
+            tuition = col1.number_input("Total Tuition Program Cost (€)")
+            fees = col2.number_input("Mandatory Fees / Books / Insurance (€)")
 
             st.divider()
 
             st.markdown("### Lifestyle & Living")
             col3, col4 = st.columns(2)
-            living = col3.number_input("Estimated Monthly Living Cost (€)", 0, 5000, 0, 50)
-            months = col4.number_input("Study Duration (Months)", 0, 60, 0, 1)
+            # Constraints (min/max/default/step) removed
+            living = col3.number_input("Estimated Monthly Living Cost (€)")
+            months = col4.number_input("Study Duration (Months)")
 
             st.divider()
 
             st.markdown("### Funding & Offsets")
             c_s1, c_s2 = st.columns([2, 1])
             scholarship = c_s1.slider("Tuition Scholarship Award (%)", 0, 100, 0)
-            part_time = c_s2.number_input("Monthly Income Offset (€)", 0, 5000, 0, 50)
+            # Constraints (min/max/default/step) removed
+            part_time = c_s2.number_input("Monthly Income Offset (€)")
 
             st.divider()
 
@@ -163,19 +166,18 @@ def render_price_calculator():
                 key="calc_currency",
             )
 
+            # Constraints (min_value/value) removed
             exchange = col_ex2.number_input(
-    "Exchange Rate",
-    min_value=0.0,
-    value=0.0,
-    format="%.4f",
-    disabled=False,  # ✅ always editable inside a form
-    help=(
-        "Optional. Pick a currency if you want conversion."
-        if currency_name == PLACEHOLDER
-        else f"How much is 1 Euro worth in {currency_name}?"
-    ),
-    key="calc_exchange",
-)
+                "Exchange Rate",
+                format="%.4f",
+                disabled=False,
+                help=(
+                    "Optional. Pick a currency if you want conversion."
+                    if currency_name == PLACEHOLDER
+                    else f"How much is 1 Euro worth in {currency_name}?"
+                ),
+                key="calc_exchange",
+            )
 
             submitted = st.form_submit_button("Generate Financial Breakdown", use_container_width=True)
 
