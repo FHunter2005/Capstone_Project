@@ -55,25 +55,27 @@ def search_masters_tool(user_query: str):
         results = list(collection.aggregate(pipeline))
 
         if not results:
-            return "No programs found.", []
+            return {"text": "No programs found.", "raw_data": []}
 
         # Create a string representation for the AI to "read"
+        sanitized_results = []
         summary = f"Found {len(results)} programs:\n"
         for doc in results:
+            if "_id" in doc:
+                doc["_id"] = str(doc["_id"])
+            sanitized_results.append(doc)
             summary += f"- {doc.get('master')} at {doc.get('university')} (Score: {doc.get('score', 0):.2f})\n"
-        
-        # Return a dictionary containing both the text and the raw data
+
         return {"text": summary, "raw_data": results}
 
     try:
         if obs:
             with obs as span:
                 output = _run()
-                span.update(output={"count": len(output[1]) if isinstance(output, tuple) else 0})
-                return output["text"] if isinstance(output, dict) else output
+                return output 
         else:
             res = _run()
-            return res["text"] if isinstance(res, dict) else res
+            return res
     except Exception as e:
         return f"Error: {e}"
 

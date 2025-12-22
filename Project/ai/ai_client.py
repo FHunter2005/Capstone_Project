@@ -46,14 +46,17 @@ class AIClient:
         
         response = self.chat_session.send_message(user_text)
 
+        self.last_tool_results = []
         # Check the chat history for the most recent function response
         if self.chat_session.history:
-            last_msg = self.chat_session.history[-1]
-            for part in last_msg.parts:
-                if fn := part.function_response:
-                    if "results" in fn.response:
-                        self.last_tool_results = fn.response["results"]
-
+            for msg in reversed(self.chat_session.history):
+                for part in msg.parts:
+                    if fn := part.function_response:
+                        if "raw_data" in fn.response:
+                            self.last_tool_results = fn.response["raw_data"]
+                            break
+                if self.last_tool_results:
+                    break
         get_client().flush()
         return response.text
 
