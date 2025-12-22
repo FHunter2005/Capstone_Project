@@ -13,45 +13,70 @@ The core philosophy is **"Context-Aware AI"**: effectively injecting user data (
 
 ## 3. System Layers
 
-The application is structured into four distinct layers to enforce separation of concerns:
+The system is organized into specific functional areas to ensure modularity and ease of maintenance.
+Here is the complete, updated ARCHITECTURE.md file.
 
-### **A. Presentation Layer (Frontend)**
-* **Technology:** Streamlit (`app.py`)
-* **Responsibility:** Handles user interaction, state management (session history), and visual rendering of data (maps, cards, chat bubbles).
-* **Communication:** Interacts with the backend exclusively via REST API calls.
+# MasterMatch Architecture & Technical Specification
 
-### **B. Service Layer (Backend)**
-* **Technology:** FastAPI (`backend/main.py`)
-* **Responsibility:** Acts as the orchestrator. It handles authentication, validates requests, manages sessions, and routes data between the Database and the AI Agent.
-* **Security:** Implements JWT (JSON Web Token) authentication to secure endpoints.
+## 1. High-Level Overview
 
-### **C. Intelligence Layer (AI)**
-* **Technology:** Google Gemini 1.5 Flash (`ai_client.py`) & Langfuse
-* **Responsibility:** The reasoning engine. It interprets natural language, decides when to fetch external data (Agentic workflow), and synthesizes answers.
-* **Observability:** Langfuse traces every step of the AI's execution to monitor latency, costs, and tool usage accuracy.
+MasterMatch is designed as a **Client-Server** application that leverages **Retrieval-Augmented Generation (RAG)** to provide accurate, data-driven academic advice. The system decouples the user interface from the business logic, ensuring scalability and maintainability.
 
-### **D. Data Layer (Storage)**
-* **Technology:** MongoDB Atlas
-* **Responsibility:** Stores persistent data (User Profiles, Chat Logs) and high-dimensional vector embeddings for the semantic search engine.
+The core philosophy is **"Context-Aware AI"**: effectively injecting user data (CV, budget, preferences) into the LLM's context window to minimize generic responses and maximize personalization.
 
+## 2. System Architecture Diagram
+
+![System Architecture Diagram](Architecture.png)
+
+*Figure 1: High-level data flow of the MasterMatch application.*
+
+## 3. System Architecture Layers
+
+The system is organized into specific functional areas to ensure modularity and ease of maintenance.
+
+### **A. User Interface**
+The entry point for the application, built entirely in **Streamlit**. It handles all user interactions and visualizes complex data types.
+* **Chat Interface (`app.py`):** Manages the chat session state, renders message bubbles, and displays the "Recommended Programs" cards with "Save" buttons.
+* **Visualizations (`map_tab.py`):** Renders the interactive map showing university locations using coordinates from the backend.
+* **Tools (`calculator.py`):** Provides a standalone UI for the student budget calculator.
+* **Profile Management:** Handles PDF uploads (CVs) and the manual questionnaire form.
+
+### **B. Services**
+This layer contains the core business logic, decoupled from the UI. It resides in the `services/` directory and is orchestrated by the **FastAPI** backend (`backend/main.py`).
+* **Authentication Service (`services/auth_service.py`):** Handles user registration, login, password hashing (bcrypt), and JWT token generation.
+* **Database Service (`services/db_service.py`):** Manages the connection to MongoDB Atlas. It abstracts low-level database operations like inserting users or querying chat history.
+* **Location Service (`services/location_service.py`):** Responsible for geocoding university names into latitude/longitude coordinates for the map visualization.
+
+### **C. Tools (AI & Agent Capabilities)**
+This layer defines the "skills" available to the AI Agent (`ai/ai_client.py`). The agent decides autonomously when to use these tools based on the user's intent.
+* **Masters Search Tool (`tools/agent_tools.py`):** The primary RAG tool. It takes a natural language query (e.g., "Marketing programs") and performs a **Vector Search** on the MongoDB embeddings to return the top matching Master's degrees.
+* **Context Injection:** Before the AI receives a message, the system automatically injects the user's profile (GPA, Budget, CV summary) as a "System Instruction," ensuring the tool usage is personalized.
+* **Observability:** All tool calls are traced using **Langfuse**, allowing developers to see exactly which tool was called and with what arguments.
+
+### **E. Data Schema**
+We use **MongoDB** for its flexibility with unstructured data (like CVs).
+
+**1. Users Collection**
+Stores authentication details and the "Student Profile."
+```json
+{
+  "_id": "ObjectId(...)",
+  "username": "student123",
+  "profile": {
+    "budget": 5000,
+    "gpa": 15,
+    "interests": "Data Science, AI"
+  },
+  "cv_text": "Full extracted text from the PDF..."
+}
+```
 ---
 
 ## 4. Data Models
 
 We utilize a **Document-Oriented** database (MongoDB) to handle flexible user profiles and unstructured curriculum data.
 
-### 4.1. User Collection (`users`)
-Stores authentication data and the "Student Profile" used for context injection.
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `_id` | ObjectId | Unique identifier |
-| `username` | String | Unique login handle |
-| `password_hash` | String | Bcrypt hashed password |
-| `profile` | Object | Nested object containing `gpa`, `budget`, `city`, `interests` |
-| `cv_text` | String | Extracted text from uploaded PDF CVs |
-
-### 4.2. Masters Collection (`masters_portugal`)
+### 4.1. Masters Collection (`masters_portugal`)
 This collection supports **Vector Search** via the `embedding` field.
 
 | Field | Type | Description |

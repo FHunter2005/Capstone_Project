@@ -123,33 +123,33 @@ Instructions for deploying your own instance (if applicable).
 
 ## Project Structure
 ```
-Project/
-├── ai/    
-│    ├── ai_client.py            # Gemini Client Wrapper
-│    ├── models.ipynb
-│    └── prompts                 # AI prompts
-├── backend/
-│     └── main.py                # FastAPI Backend Entry Point
-├── extras/
-│     ├── data/
-│     └── photos/
-├── services/
-│     ├── auth_service.py        # User Management & Auth
-│     ├── db_service.py          # MongoDB Connection
-│     └── location_service.py    # Maps Logic
-├── tools/                       # Utility functions
-│     └── agent_tools.py         # AI Function Calling Tools
-├── utils/
-│     ├── config.py              # Config loader
-│     ├── observability.py       # Langfuse setup
-│     └── web_scrapping.ipynb
-├── docs/
-│   └── ARCHITECTURE.md          # Architecture decisions and diagrams Team
-├── app.py                       # Streamlit Frontend Entry Point
-├── calculator.py                # Budget Calculator Logic
-├── map_tab.py                   # Map Visualization Logic
-├── requirements.txt             # Project Dependencies
-├── .env.example                 # Template for environment variables
+Capstone_Project
+├── Project/
+│   ├── ai/    
+│   │    ├── ai_client.py            # Gemini Client Wrapper
+│   │    ├── models.ipynb
+│   │    └── prompts                 # AI prompts
+│   ├── backend/
+│   │     └── main.py                # FastAPI Backend Entry Point
+│   ├── extras/
+│   │     ├── data/
+│   │     └── photos/
+│   ├── services/
+│   │     ├── auth_service.py        # User Management & Auth
+│   │     ├── db_service.py          # MongoDB Connection
+│   │     └── location_service.py    # Maps Logic
+│   ├── tools/                       # Utility functions
+│   │     └── agent_tools.py         # AI Function Calling Tools
+│   ├── utils/
+│   │     ├── config.py              # Config loader
+│   │     └── observability.py       # Langfuse setup
+│   ├── docs/
+│   │   └── ARCHITECTURE.md          # Architecture decisions and diagrams Team
+│   ├── app.py                       # Streamlit Frontend Entry Point
+│   ├── calculator.py                # Budget Calculator Logic
+│   ├── map_tab.py                   # Map Visualization Logic
+│   ├── requirements.txt             # Project Dependencies
+│   └── .env.example                 # Template for environment variables
 └── README.md                    # This file
 ```
 ## Team
