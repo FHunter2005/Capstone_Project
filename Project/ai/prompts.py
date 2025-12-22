@@ -3,14 +3,20 @@ import google.generativeai as genai
 from utils.config import Config
 
 """
-This module centralizes all system prompts and 'router' logic for the AI.
-It also contains the utility to compress large CVs into a 'User Persona'.
+AI Prompts & Router Logic.
+
+This module centralizes all system prompts, persona definitions, and 'router' logic 
+for the MasterMatch AI. It separates prompt management from application logic, 
+making it easier to iterate on agent behavior without touching core code.
+
+It also contains the logic to compress large, unstructured CVs into a concise 
+'User Persona' that fits efficiently into the LLM's context window.
 """
 
 # --- PROMPTS ---
 
-# Project/ai/prompts.py
-
+# The core persona definition for the AI Agent.
+# It defines the agent's identity, operational constraints, and fallback behaviors.
 BASE_SYSTEM_INSTRUCTION = """
 You are MasterMatch, an expert academic advisor for Master's degrees in Portugal.
 
@@ -28,7 +34,7 @@ YOUR BEHAVIOR:
 4. PERSONALITY: Be professional, encouraging, and concise.
 """
 
-
+# Prompt used to distill raw user data (CV + Q&A) into a token-efficient summary.
 PERSONA_SUMMARIZER_PROMPT = """
 You are an expert profile analyzer. Summarize this student's data into a specific 'User Persona' 
 for an academic advisor AI. 
@@ -48,15 +54,27 @@ Output a single paragraph starting with "User Persona:".
 
 def generate_persona_summary(cv_text: str, manual_data: dict) -> str:
     """
-    Calls the LLM to summarize a long CV into a concise User Persona.
-    Uses the configured model (or a faster/cheaper one if specified).
+    Calls the LLM to summarize a potentially long CV and manual form data into a 
+    concise 'User Persona' string.
+
+    This optimization reduces the number of tokens passed to the agent in subsequent 
+    chat turns, saving cost and latency while preserving key context.
+
+    Args:
+        cv_text (str): The raw text extracted from the user's PDF CV.
+        manual_data (dict): Dictionary containing answers from the onboarding questionnaire (e.g., GPA, Budget).
+
+    Returns:
+        str: A concise summary paragraph (e.g., "User Persona: A Data Science student with a 2000 EUR budget...").
+             Returns an empty string on failure to prevent blocking the flow.
     """
     try:
         genai.configure(api_key=Config.GOOGLE_API_KEY)
+        # Using the standard model for summarization tasks
         model = genai.GenerativeModel(Config.LLM_MODEL)
         
-        # safely truncate extremely long text just to fit context window if needed, 
-        # but 10k chars is usually fine for Gemini 1.5
+        # Safely truncate extremely long text to avoid hitting context window limits
+        # (20k chars is well within Gemini 1.5's limit, but good for safety).
         safe_cv = cv_text[:20000] if cv_text else "No CV provided."
         
         prompt = PERSONA_SUMMARIZER_PROMPT.format(
@@ -67,25 +85,38 @@ def generate_persona_summary(cv_text: str, manual_data: dict) -> str:
         response = model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
+        # Log error but don't crash; the app can function without a persona summary if needed
         print(f"⚠️ Error generating persona summary: {e}")
         return ""
 
 def get_system_instruction(user_context: str = "", intent: str = "general") -> str:
     """
-    ROUTER LOGIC:
-    Constructs the final system instruction dynamically based on the situation.
+    Constructs the final system instruction dynamically based on the user's context and intent.
+
+    This implements a basic 'Router' pattern: modifying the agent's instructions 
+    at runtime to better suit the current task (e.g., stricter fact-checking vs. empathetic support).
+
+    Args:
+        user_context (str): The generated persona summary (from generate_persona_summary).
+        intent (str): The detected intent of the conversation (default: "general"). 
+                      Can be 'research', 'support', etc.
+
+    Returns:
+        str: The complete, concatenated system prompt to be sent to the LLM.
     """
     
-    # 1. Start with the Base Instruction
+    # 1. Start with the Base Instruction (Identity & Constraints)
     instruction = BASE_SYSTEM_INSTRUCTION
 
     # 2. Apply Mode/Router Logic (Extensible)
+    # Appends specific behavioral instructions based on the requested 'intent'
     if intent == "research":
         instruction += "\n\nCURRENT MODE: Deep Researcher. Focus strictly on facts, tuition fees, and admission requirements."
     elif intent == "support":
         instruction += "\n\nCURRENT MODE: Empathetic Mentor. Be reassuring and focus on the student's potential."
     
     # 3. Inject User Context (The Persona)
+    # This places the user's specific data at the end of the prompt to ensure high attention
     if user_context:
         instruction += f"\n\nUSER CONTEXT (Prioritize this info):\n{user_context}"
 

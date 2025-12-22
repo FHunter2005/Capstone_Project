@@ -2,9 +2,19 @@ from __future__ import annotations
 from langfuse import observe
 import re
 
+"""
+Agent Tools Module.
+
+This module defines the specific "skills" (functions) available to the AI Agent.
+These tools bridge the gap between the LLM's reasoning and the application's data.
+Critically, they handle the 'Hybrid Search' logic—combining semantic vector retrieval 
+with strict deterministic filtering (e.g., Budget < X) to ensure accuracy.
+"""
+
 def _tool_observation(tool_name: str, input_data: dict):
     """
-    Starts a Langfuse observation span for a tool call, if Langfuse is enabled.
+    Helper to start a Langfuse observation span for tool calls.
+    Returns None if observability is disabled/misconfigured.
     """
     try:
         from utils.observability import get_langfuse
@@ -20,36 +30,42 @@ def _tool_observation(tool_name: str, input_data: dict):
     except Exception:
         return None
 
-# Project/tools/agent_tools.py
-
-# ... (keep _tool_observation function as is) ...
 
 def parse_tuition_value(tuition_str: str) -> float:
     """
-    Extracts the numeric value from strings like '1250 EUR / year' or '30 000 EUR'.
-    Returns a float or a high number if not found.
+    Utility to normalize tuition fee strings into float values for comparison.
+    Handles various formats like '1 250 EUR', '30.000', or '1500 / year'.
     """
     if not tuition_str or not isinstance(tuition_str, str):
         return 0.0
     
-    # Remove spaces (e.g. "30 000") and look for digits
+    # Normalize: Remove spaces (common in EU number formatting) and replace commas with dots
     clean_str = tuition_str.replace(" ", "").replace(",", ".")
+    
+    # Extract the first sequence of digits found
     match = re.search(r"(\d+)", clean_str)
     if match:
         return float(match.group(1))
     return 0.0
 
+
 @observe(name="tool_search_masters")
 def search_masters_tool(user_query: str, max_budget: int = None, preferred_location: str = None, preferred_duration: str = None):
     """
-    USE THIS TOOL to find master's programs.
+    CORE RAG TOOL: Performs a Hybrid Search for Master's programs.
     
+    Strategy:
+    1. Retrieval: Semantic Vector Search to find the top 50 matches for the topic.
+    2. Filtering: Strict Python-based filtering for Budget, Location, and Duration.
+    3. Ranking: Prioritizes exact matches, falling back to 'close matches' if necessary.
+
     Args:
-        user_query: The topic or field of study (e.g. "Marketing", "AI").
-        max_budget: The maximum tuition fee allowed (in EUR).
-        preferred_location: The city or region (e.g. "Lisbon").
-        preferred_duration: The duration (e.g. "2 years").
+        user_query (str): The semantic topic (e.g. "Marketing", "Artificial Intelligence").
+        max_budget (int): Hard limit for tuition fees (EUR).
+        preferred_location (str): Target city or region (e.g. "Lisbon").
+        preferred_duration (str): Target duration (e.g. "2 years").
     """
+    # Start tracing span
     obs = _tool_observation("search_masters_tool", {
         "user_query": user_query, 
         "max_budget": max_budget,
@@ -57,6 +73,7 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
         "duration": preferred_duration
     })
 
+    # Lazy imports to avoid circular dependencies during app startup
     from ai.ai_client import AIClient
     from services.db_service import DatabaseService
 
@@ -65,10 +82,12 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
         db_service = DatabaseService()
         collection = db_service.masters()
 
+        # Step 1: Generate Embedding for the user's query
         user_emb = ai_client.embed(user_query)
 
-        # 1. Fetch a LARGER pool of candidates (e.g. 50) based on semantic similarity
-        #    We filter them using Python logic below to ensure strict compliance.
+        # Step 2: Vector Search (Semantic Retrieval)
+        # We fetch a LARGE pool (top_k=50) to maximize the chance of finding programs 
+        # that satisfy the strict constraints in the next step.
         top_k = 50 
         pipeline = [
             {"$vectorSearch": {
@@ -78,6 +97,7 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
                 "numCandidates": top_k * 10,
                 "limit": top_k,
             }},
+            # Project only necessary fields and the search score
             {"$project": {"embedding": 0, "score": {"$meta": "vectorSearchScore"}}}
         ]
 
@@ -86,61 +106,62 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
         if not raw_results:
             return {"text": "No programs found in the database.", "raw_data": []}
 
-        # 2. Filter and Rank Results in Python
+        # Step 3: Python-Side Deterministic Filtering
         exact_matches = []
         close_matches = []
 
         for doc in raw_results:
             doc["_id"] = str(doc.get("_id"))
             
-            # --- Check Constraints ---
             is_match = True
             reasons = []
 
-            # Check Budget
+            # -- Constraint: Budget --
             if max_budget:
                 fee_str = doc.get("Tuition Fee") or doc.get("tuition", "")
                 cost = parse_tuition_value(fee_str)
-                # If cost > budget + 10% tolerance, fail
+                # Apply a 10% tolerance margin to avoid filtering borderline cases
                 if cost > (max_budget * 1.1): 
                     is_match = False
                     reasons.append(f"Over budget ({fee_str})")
 
-            # Check Location (Partial string match)
+            # -- Constraint: Location --
             if preferred_location:
                 loc = doc.get("Location") or doc.get("location", "")
+                # Simple substring match (case-insensitive)
                 if preferred_location.lower() not in loc.lower():
                     is_match = False
                     reasons.append(f"Wrong location ({loc})")
             
-            # Check Duration
+            # -- Constraint: Duration --
             if preferred_duration:
                 dur = doc.get("Duration") or doc.get("duration", "")
-                # Simple check: if user wants "1 year" and course is "2 years", that's a mismatch
                 if preferred_duration.lower() not in dur.lower():
-                     # Allow slight flexibility (e.g. "2 years" fits "1-2 years") could be added here
                      is_match = False
                      reasons.append(f"Duration mismatch ({dur})")
 
-            # --- Categorize ---
+            # -- Categorization --
             if is_match:
                 exact_matches.append(doc)
             else:
-                # Only keep close matches that have high semantic relevance (score)
-                # or failed only 1-2 criteria.
+                # Store reason for rejection to potentially explain to the user later
                 doc["missed_criteria"] = ", ".join(reasons)
                 close_matches.append(doc)
 
-        # 3. Construct the Response
-        # Priority: Exact Matches -> Top 5
+        # Step 4: Final Selection & Safety Net
+        # Priority: Return up to 5 Exact Matches
         final_results = exact_matches[:5]
         
-        # Safety Net: If no exact matches, pick top close matches
+        # Fallback: If strict constraints killed all results, return the "closest" ones
+        # This prevents the "I found nothing" dead-end experience.
         safety_net_triggered = False
         if not final_results:
             safety_net_triggered = True
-            final_results = close_matches[:3] # Suggest top 3 alternatives
+            final_results = close_matches[:3]
 
+        # Step 5: Format Output for the LLM
+        # We construct a text summary for the LLM to "read", and pass the raw dicts 
+        # separately in 'raw_data' for the UI to render.
         summary = ""
         if safety_net_triggered:
             summary += f"⚠️ NO EXACT MATCHES FOUND for budget < {max_budget}, {preferred_location}, {preferred_duration}.\n"
@@ -157,6 +178,7 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
 
         return {"text": summary, "raw_data": final_results}
 
+    # Execute with observability handling
     try:
         if obs:
             with obs as span:
@@ -166,10 +188,12 @@ def search_masters_tool(user_query: str, max_budget: int = None, preferred_locat
     except Exception as e:
         return f"Error: {e}"
 
-# ... (keep get_map_link_tool and my_toolbox definition) ...
 
 @observe(name="tool_get_map_link")
 def get_map_link_tool(university_name: str):
+    """
+    Retrieves the Google Maps URL for a specific university via the LocationService.
+    """
     obs = _tool_observation("get_map_link_tool", {"university_name": university_name})
 
     def _run():
@@ -178,6 +202,7 @@ def get_map_link_tool(university_name: str):
         link = service.get_location_link(university_name)
         return link
 
+    # Error handling wrapper to prevent agent crash on DB failure
     if obs is None:
         try:
             link = _run()
@@ -201,17 +226,26 @@ def get_map_link_tool(university_name: str):
             pass
         return f"Error in get_map_link_tool: {e}"
 
+
 @observe(name="tool_final_recommendations")
 def final_recommendations_tool(programs: list[dict]):
     """
-    STEP 2: USE THIS TOOL to display the FINAL selection of programs to the user.
-    Input: 'programs' -> A list of the program dictionaries you selected from the search results.
-    Each dictionary MUST contain: 'master', 'university', 'Location', 'Tuition Fee'.
+    UI SIGNALING TOOL.
+    
+    This tool does not perform logic. Instead, the Agent calls it to signal 
+    that it has selected specific programs to recommend. 
+    
+    The backend/frontend intercepts the 'raw_data' from this tool call 
+    to render the "Recommended Programs" cards in the UI.
+    
+    Args:
+        programs (list[dict]): The list of selected program dictionaries found by search_masters_tool.
     """
     obs = _tool_observation("final_recommendations_tool", {"count": len(programs)})
     
-    # This simply "echoes" the data so the Frontend can see it in 'raw_data'
+    # Echo the data back. The key is 'raw_data', which the frontend looks for.
     summary = f"Displaying {len(programs)} recommendations to the user."
     return {"text": summary, "raw_data": programs}
 
+# Export the tools list for the AI Client
 my_toolbox = [search_masters_tool, get_map_link_tool, final_recommendations_tool]
