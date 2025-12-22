@@ -10,21 +10,16 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ai.ai_client import AIClient
 from services.auth_service import AuthService
+from ai.prompts import get_system_instruction, PERSONA_SUMMARIZER_PROMPT # Import the new Prompt Layer
 
 app = FastAPI(title="MasterMatch API", version="1.0.0")
 
-# Global instances to avoid re-initializing on every request
+# Global instances
 auth_service = AuthService()
-
-# This helper will look for the "Authorization: Bearer <token>" header
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 # --- Security Dependency ---
 async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """
-    Verifies the JWT token and returns the username. 
-    Raises 401 if the token is invalid or expired.
-    """
     username = auth_service.verify_token(token)
     if not username:
         raise HTTPException(
@@ -47,16 +42,17 @@ class ChatResponse(BaseModel):
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
     request: ChatRequest, 
-    current_user: str = Depends(get_current_user) # Protect the endpoint
+    current_user: str = Depends(get_current_user)
 ):
     try:
-        # Security Check: Ensure the token-user matches the requested username
         if current_user != request.username:
             raise HTTPException(status_code=403, detail="Forbidden: You cannot act as another user")
 
-        # 1. Get User Profile Context
+        # 1. Get User Profile Data
         user_profile = auth_service.get_profile(request.username)
         
+        # 2. Formulate Context String (Raw or Summary)
+        # Note: In a future step, we can use PERSONA_SUMMARIZER_PROMPT here to generate a cached summary
         context_str = ""
         if user_profile:
             cv_text = user_profile.get("cv_text", "")
@@ -65,9 +61,9 @@ async def chat_endpoint(
             budget = user_profile.get("budget", "N/A")
             interests = user_profile.get("interests", "N/A")
 
-            context_str = "USER CONTEXT (Prioritize this info):"
+            # Simple concatenation for now, passed to the Prompt Layer
             if cv_text:
-                context_str += f"\n[RESUME/CV CONTENT]: {cv_text[:3000]}..." 
+                context_str += f"[RESUME/CV CONTENT]: {cv_text[:3000]}... "
             
             if background != "N/A" or budget != "N/A":
                 context_str += (
@@ -78,16 +74,25 @@ async def chat_endpoint(
                     f"Interests: {interests}."
                 )
 
-        # 2. Prepare History
-        history_for_ai = request.history[-15:] if request.history else []
-        if context_str:
-            history_for_ai.insert(0, {"role": "system", "content": context_str})
+        # 3. Call the Prompt Router
+        # We can detect intent here (e.g. if 'search' in message), or default to "general"
+        current_intent = "general" 
+        system_instruction = get_system_instruction(
+            user_context=context_str, 
+            intent=current_intent
+        )
 
-        # 3. Run AI and Capture Tool Results
-        client = AIClient(history_messages=history_for_ai)
+        # 4. Prepare History (Clean, no system injection here)
+        history_for_ai = request.history[-15:] if request.history else []
+
+        # 5. Run AI with Dynamic System Instruction
+        client = AIClient(
+            history_messages=history_for_ai,
+            system_instruction=system_instruction # Pass the router result
+        )
         ai_response_text = client.send_message_to_agent(request.message)
 
-        # 4. Extract Data from Tool Calls
+        # 6. Extract Data from Tool Calls
         found_programs = []
         if hasattr(client, 'last_tool_results') and client.last_tool_results:
             found_programs = client.last_tool_results
@@ -95,7 +100,7 @@ async def chat_endpoint(
                 if "_id" in doc:
                     doc["_id"] = str(doc["_id"])
 
-        # 5. Save to DB
+        # 7. Save to DB
         auth_service.save_message(request.thread_id, "user", request.message)
         auth_service.save_message(request.thread_id, "assistant", ai_response_text)
 
