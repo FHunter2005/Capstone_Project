@@ -43,7 +43,7 @@ The entry point for the application, built entirely in **Streamlit**. It handles
 
 ### **B. Services**
 This layer contains the core business logic, decoupled from the UI. It resides in the `services/` directory and is orchestrated by the **FastAPI** backend (`backend/main.py`).
-* **Authentication Service (`services/auth_service.py`):** Handles user registration, login, password hashing (bcrypt), and JWT token generation.
+* **Authentication Service (`services/auth_service.py`):** Handles user registration, login and password hashing (bcrypt).
 * **Database Service (`services/db_service.py`):** Manages the connection to MongoDB Atlas. It abstracts low-level database operations like inserting users or querying chat history.
 * **Location Service (`services/location_service.py`):** Responsible for geocoding university names into latitude/longitude coordinates for the map visualization.
 
