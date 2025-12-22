@@ -35,13 +35,12 @@ from ai.ai_client import AIClient  # kept in case you want to use it later
 
 # --- Constants & Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "mm.png")
-LOTTIE_PATH = os.path.join(BASE_DIR, "gif.json")
-SIDE_PATH = os.path.join(BASE_DIR, "photo.jpg")
+LOGO_PATH = os.path.join(BASE_DIR, "extras/photos/mm.png")
+LOTTIE_PATH = os.path.join(BASE_DIR, "extras/photos/gif.json")
+SIDE_PATH = os.path.join(BASE_DIR, "extras/photos/photo.jpg")
 
 # Optional: place capa.jpg next to app.py
-LOGIN_HERO_PATH = os.path.join(BASE_DIR, "capa.jpg")
-
+LOGIN_HERO_PATH = os.path.join(BASE_DIR, "extras/photos/capa.jpg")
 # Backend URL (use env var in deploy; defaults to local)
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000")
 CHAT_ENDPOINT = f"{BACKEND_BASE_URL.rstrip('/')}/chat"
