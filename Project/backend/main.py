@@ -1,4 +1,4 @@
-# backend/main.py
+# Project/backend/main.py
 import sys
 import os
 from typing import List, Optional, Dict, Any
@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ai.ai_client import AIClient
 from services.auth_service import AuthService
-from ai.prompts import get_system_instruction, PERSONA_SUMMARIZER_PROMPT # Import the new Prompt Layer
+from ai.prompts import get_system_instruction, generate_persona_summary
 
 app = FastAPI(title="MasterMatch API", version="1.0.0")
 
@@ -51,44 +51,46 @@ async def chat_endpoint(
         # 1. Get User Profile Data
         user_profile = auth_service.get_profile(request.username)
         
-        # 2. Formulate Context String (Raw or Summary)
-        # Note: In a future step, we can use PERSONA_SUMMARIZER_PROMPT here to generate a cached summary
-        context_str = ""
-        if user_profile:
-            cv_text = user_profile.get("cv_text", "")
-            background = user_profile.get("background", "N/A")
-            gpa = user_profile.get("gpa", "N/A")
-            budget = user_profile.get("budget", "N/A")
-            interests = user_profile.get("interests", "N/A")
-
-            # Simple concatenation for now, passed to the Prompt Layer
-            if cv_text:
-                context_str += f"[RESUME/CV CONTENT]: {cv_text[:3000]}... "
-            
-            if background != "N/A" or budget != "N/A":
-                context_str += (
-                    f"\n[MANUAL PROFILE]: "
-                    f"Background: {background}, "
-                    f"GPA: {gpa}, "
-                    f"Budget: {budget}, "
-                    f"Interests: {interests}."
-                )
+        # 2. OPTIMIZED CONTEXT: Check for cached summary
+        user_persona = user_profile.get("summary") 
+        
+        # If we have profile data but NO summary, generate it now (Lazy Loading)
+        if not user_persona and user_profile:
+             cv_text = user_profile.get("cv_text", "")
+             
+             # Only generate if there is actual data to summarize
+             if cv_text or user_profile.get("background"):
+                 print("⚡ Generating User Persona Summary (One-time cost)...")
+                 
+                 manual_data = {
+                     "background": user_profile.get("background"),
+                     "budget": user_profile.get("budget"),
+                     "interests": user_profile.get("interests"),
+                     "gpa": user_profile.get("gpa")
+                 }
+                 
+                 user_persona = generate_persona_summary(cv_text, manual_data)
+                 
+                 # Save it so we don't do this again next time
+                 if user_persona:
+                     auth_service.save_profile_summary(request.username, user_persona)
 
         # 3. Call the Prompt Router
-        # We can detect intent here (e.g. if 'search' in message), or default to "general"
+        # (Optional: You could add logic here to detect intent from request.message)
         current_intent = "general" 
+        
         system_instruction = get_system_instruction(
-            user_context=context_str, 
+            user_context=user_persona, 
             intent=current_intent
         )
 
-        # 4. Prepare History (Clean, no system injection here)
+        # 4. Prepare History (Clean, no system injection in messages)
         history_for_ai = request.history[-15:] if request.history else []
 
         # 5. Run AI with Dynamic System Instruction
         client = AIClient(
             history_messages=history_for_ai,
-            system_instruction=system_instruction # Pass the router result
+            system_instruction=system_instruction
         )
         ai_response_text = client.send_message_to_agent(request.message)
 
@@ -102,13 +104,7 @@ async def chat_endpoint(
 
         # 7. Save to DB
         auth_service.save_message(request.thread_id, "user", request.message)
-        
-        auth_service.save_message(
-            request.thread_id, 
-            "assistant", 
-            ai_response_text, 
-            data=found_programs
-        )
+        auth_service.save_message(request.thread_id, "assistant", ai_response_text)
 
         return ChatResponse(response=ai_response_text, data=found_programs)
 

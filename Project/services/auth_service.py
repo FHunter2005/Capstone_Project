@@ -1,4 +1,4 @@
-# services/auth_service.py
+# Project/services/auth_service.py
 import bcrypt
 import jwt
 import os
@@ -115,39 +115,17 @@ class AuthService:
         try:
             doc = self.logs.find_one({"_id": ObjectId(thread_id)})
             if doc and "messages" in doc:
-                # FIX: Explicitly retrieve 'data' so the collapsible list can render
-                return [
-                    {
-                        "role": m["role"], 
-                        "content": m["content"], 
-                        "data": m.get("data") # <--- Retrieves the list of masters
-                    } 
-                    for m in doc["messages"]
-                ]
+                return [{"role": m["role"], "content": m["content"]} for m in doc["messages"]]
         except Exception:
             return []
         return []
 
-    def save_message(self, thread_id: str, role: str, content: str, data: list = None):
-        """
-        Saves a message to the database. 
-        Now accepts optional 'data' to persist the university recommendations.
-        """
+    def save_message(self, thread_id: str, role: str, content: str):
         if not thread_id:
             return
-        
-        message_doc = {
-            "role": role, 
-            "content": content, 
-            "timestamp": datetime.now()
-        }
-        
-        if data:
-            message_doc["data"] = data
-
         self.logs.update_one(
             {"_id": ObjectId(thread_id)},
-            {"$push": {"messages": message_doc}},
+            {"$push": {"messages": {"role": role, "content": content, "timestamp": datetime.now()}}},
         )
 
     def delete_thread(self, thread_id: str):
@@ -163,17 +141,30 @@ class AuthService:
         except Exception:
             return
 
-
     def update_profile(self, username: str, profile_data: dict):
-        """Saves the user's background/CV."""
+        """Saves the user's background/CV. This clears the 'summary' to force regeneration."""
         try:
+            # We also unset 'profile.summary' if it exists, so it regenerates next chat
             self.users.update_one(
                 {"username": username},
-                {"$set": {"profile": profile_data}}
+                {
+                    "$set": {"profile": profile_data},
+                    "$unset": {"profile.summary": ""} 
+                }
             )
             return True, "Profile updated successfully!"
         except Exception as e:
             return False, str(e)
+
+    def save_profile_summary(self, username: str, summary: str):
+        """Saves ONLY the generated summary so we don't need to re-generate it."""
+        try:
+            self.users.update_one(
+                {"username": username},
+                {"$set": {"profile.summary": summary}}
+            )
+        except Exception as e:
+            print(f"Error saving summary: {e}")
 
     def get_profile(self, username: str) -> dict:
         """Gets the user's background/CV."""
