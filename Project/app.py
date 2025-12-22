@@ -1,4 +1,4 @@
-# app.py
+# Project/app.py
 # ===========================
 # Masters Finder – Chatbot + Calculator
 # ===========================
@@ -1099,13 +1099,20 @@ elif selected == "profile":
                     with c1:
                         st.write(f"📄 **{doc.get('name', 'Untitled')}**")
                         st.caption(f"Uploaded: {doc.get('date', 'Unknown')}")
+                        # Load/View CV content feature
+                        with st.expander("View Content"):
+                            st.text(doc.get("text", "")[:1000] + ("..." if len(doc.get("text", "")) > 1000 else ""))
                     with c2:
+                        # Delete CV functionality
                         if st.button("🗑️", key=f"del_cv_{i}"):
                             saved_docs.pop(i)
                             full_text = "\n\n".join([d["text"] for d in saved_docs])
                             auth_service.update_profile(
                                 username,
-                                {"cv_documents": saved_docs, "cv_text": full_text},
+                                {
+                                    "cv_documents": saved_docs, 
+                                    "cv_text": full_text
+                                },
                             )
                             st.rerun()
             st.divider()
@@ -1342,4 +1349,3 @@ elif selected == "calculator":
 elif selected == "map":
     st.markdown("<h2 style='text-align: center; color: #F4B400;'>Top Universities Worldwide</h2>", unsafe_allow_html=True)
     render_university_map()
-

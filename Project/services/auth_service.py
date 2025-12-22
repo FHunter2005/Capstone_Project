@@ -144,11 +144,15 @@ class AuthService:
     def update_profile(self, username: str, profile_data: dict):
         """Saves the user's background/CV. This clears the 'summary' to force regeneration."""
         try:
-            # We also unset 'profile.summary' if it exists, so it regenerates next chat
+            # FIX: Use dot notation for keys to MERGE data instead of overwriting the whole 'profile' object.
+            # This allows us to $set specific fields (like profile.cv_documents) and $unset profile.summary
+            # in the same operation without conflict.
+            update_fields = {f"profile.{key}": value for key, value in profile_data.items()}
+
             self.users.update_one(
                 {"username": username},
                 {
-                    "$set": {"profile": profile_data},
+                    "$set": update_fields,
                     "$unset": {"profile.summary": ""} 
                 }
             )
