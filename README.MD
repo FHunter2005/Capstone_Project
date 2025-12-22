@@ -57,20 +57,10 @@ cd MasterMatch
 ```bash
 pip install -r requirements.txt
 ```
+
 3. Set up environment variables:
 
 Create a `.env` file in the root directory and add the following keys (replace with your own credentials):
-
-3. **Set up environment variables:**
-
-   First, generate a secure secret key for authentication by running this command in your terminal:
-   ```bash
-   python -c "import secrets; print(secrets.token_hex(32))"
-
-**Required environment variables:**
-```
-# Security
-JWT_SECRET=paste_your_generated_hex_string_here
 
 # Google Gemini
 GOOGLE_API_KEY=your_google_key_here
@@ -88,7 +78,6 @@ MONGO_DB=Capstone_Project
 
 # App Configuration
 BACKEND_BASE_URL=[http://127.0.0.1:8000](http://127.0.0.1:8000)
-```
 
 4. Run the application:
 
@@ -110,6 +99,8 @@ uv run streamlit run app.py
 **Complete Profile**: Navigate to the Profile tab. You can either fill in the questionnaire manually or upload your CV (PDF) for automatic extraction.
 
 **Chat:** Go to the Chat tab and ask questions like "Find me a Marketing Master".
+
+**Calculate** To check on the alignment of your finance ownings with your targeted degrees.
 
 **Visualize:** Use the Map tab to see where the recommended universities are located.
 
@@ -147,10 +138,10 @@ Capstone_Project
 │   │   └── ARCHITECTURE.md          # Architecture decisions and diagrams Team
 │   ├── app.py                       # Streamlit Frontend Entry Point
 │   ├── calculator.py                # Budget Calculator Logic
-│   ├── map_tab.py                   # Map Visualization Logic
-│   ├── requirements.txt             # Project Dependencies
-│   └── .env.example                 # Template for environment variables
-└── README.md                    # This file
+│   └── map_tab.py                   # Map Visualization Logic
+├── requirements.txt             # Project Dependencies
+├── README.md                    # This file
+└── .env.example                 # Template for environment variables
 ```
 ## Team
 
