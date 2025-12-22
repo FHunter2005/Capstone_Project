@@ -973,6 +973,37 @@ with st.sidebar:
             st.session_state.current_thread_id = ids[0]
 
         if ids:
+            # --- MOVE Rename/Delete ABOVE the list ---
+            c1, c2 = st.columns([1.6, 1.4])
+            with c1:
+                with st.popover("✏️ Rename", use_container_width=True):
+                    new_title = st.text_input("New title", value="", placeholder="Type a new title…", key="rename_input")
+                    if st.button("Save title", key="rename_save"):
+                        if new_title.strip() and st.session_state.current_thread_id:
+                            auth_service.update_thread_title(st.session_state.current_thread_id, new_title.strip())
+                            st.rerun()
+
+            with c2:
+                with st.popover("🗑️ Delete", use_container_width=True):
+                    st.write("Delete this conversation?")
+                    if st.button("Yes, delete", key="confirm_delete"):
+                        if st.session_state.current_thread_id:
+                            auth_service.delete_thread(st.session_state.current_thread_id)
+
+                        threads2 = auth_service.get_user_threads(username)
+                        if threads2:
+                            st.session_state.current_thread_id = threads2[0]["id"]
+                            st.session_state.messages = auth_service.load_thread_messages(st.session_state.current_thread_id)
+                        else:
+                            new_id = auth_service.create_new_thread(username)
+                            st.session_state.current_thread_id = new_id
+                            st.session_state.messages = []
+
+                        st.session_state.pop("agent_client", None)
+                        st.session_state.pop("langfuse", None)
+                        st.rerun()
+
+            # --- Conversation list (stays the same) ---
             with st.container(height=360, border=False):
                 selected_id = st.radio(
                     label="Conversations",
@@ -992,34 +1023,6 @@ with st.sidebar:
                 st.session_state.pop("langfuse", None)
                 st.rerun()
 
-        c1, c2 = st.columns([1.6, 1.4])
-        with c1:
-            with st.popover("✏️ Rename", use_container_width=True):
-                new_title = st.text_input("New title", value="", placeholder="Type a new title…", key="rename_input")
-                if st.button("Save title", key="rename_save"):
-                    if new_title.strip() and st.session_state.current_thread_id:
-                        auth_service.update_thread_title(st.session_state.current_thread_id, new_title.strip())
-                        st.rerun()
-
-        with c2:
-            with st.popover("🗑️ Delete", use_container_width=True):
-                st.write("Delete this conversation?")
-                if st.button("Yes, delete", key="confirm_delete"):
-                    if st.session_state.current_thread_id:
-                        auth_service.delete_thread(st.session_state.current_thread_id)
-
-                    threads2 = auth_service.get_user_threads(username)
-                    if threads2:
-                        st.session_state.current_thread_id = threads2[0]["id"]
-                        st.session_state.messages = auth_service.load_thread_messages(st.session_state.current_thread_id)
-                    else:
-                        new_id = auth_service.create_new_thread(username)
-                        st.session_state.current_thread_id = new_id
-                        st.session_state.messages = []
-
-                    st.session_state.pop("agent_client", None)
-                    st.session_state.pop("langfuse", None)
-                    st.rerun()
 
 
 # ---------- Content Routing ----------
