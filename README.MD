@@ -143,6 +143,10 @@ Capstone_Project
 ├── README.md                    # This file
 └── .env.example                 # Template for environment variables
 ```
+## Deployment
+
+deployment_link = https://capstoneprojectmastermatch.streamlit.app/
+
 ## Team
 
 - Duarte Fernandes — Team Lead & Backend Developer
