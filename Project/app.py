@@ -1265,7 +1265,7 @@ elif selected == "chat":
 
     if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
-        auth_service.save_message(st.session_state.current_thread_id, "user", prompt)
+        #auth_service.save_message(st.session_state.current_thread_id, "user", prompt)
 
         if len([m for m in st.session_state.messages if m["role"] == "user"]) == 1:
             new_title = prompt[:30] + "..." if len(prompt) > 30 else prompt
@@ -1321,7 +1321,7 @@ elif selected == "chat":
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.session_state.messages.append({"role": "assistant", "content": response, "data": found_data})
-        auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
+        #auth_service.save_message(st.session_state.current_thread_id, "assistant", response)
 
 
 elif selected == "favorites":
