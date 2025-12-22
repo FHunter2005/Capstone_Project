@@ -40,7 +40,7 @@ def search_masters_tool(user_query: str):
 
         user_emb = ai_client.embed(user_query)
 
-        top_k = 5
+        top_k = 10
         pipeline = [
             {"$vectorSearch": {
                 "index": "vector_index",
@@ -59,12 +59,12 @@ def search_masters_tool(user_query: str):
 
         # Create a string representation for the AI to "read"
         sanitized_results = []
-        summary = f"Found {len(results)} programs:\n"
+        summary = f"Found {len(results)} potential matches. NOW SELECT THE BEST ONES (Max 5) AND CALL 'final_recommendations_tool':\n"
         for doc in results:
             if "_id" in doc:
                 doc["_id"] = str(doc["_id"])
             sanitized_results.append(doc)
-            summary += f"- {doc.get('master')} at {doc.get('university')} (Score: {doc.get('score', 0):.2f})\n"
+            summary += f"- ID: {doc.get('_id')} | {doc.get('master')} at {doc.get('university')} (Score: {doc.get('score', 0):.2f})\n"
 
         return {"text": summary, "raw_data": results}
 
@@ -112,4 +112,17 @@ def get_map_link_tool(university_name: str):
             pass
         return f"Error in get_map_link_tool: {e}"
 
-my_toolbox = [search_masters_tool, get_map_link_tool]
+@observe(name="tool_final_recommendations")
+def final_recommendations_tool(programs: list[dict]):
+    """
+    STEP 2: USE THIS TOOL to display the FINAL selection of programs to the user.
+    Input: 'programs' -> A list of the program dictionaries you selected from the search results.
+    Each dictionary MUST contain: 'master', 'university', 'Location', 'Tuition Fee'.
+    """
+    obs = _tool_observation("final_recommendations_tool", {"count": len(programs)})
+    
+    # This simply "echoes" the data so the Frontend can see it in 'raw_data'
+    summary = f"Displaying {len(programs)} recommendations to the user."
+    return {"text": summary, "raw_data": programs}
+
+my_toolbox = [search_masters_tool, get_map_link_tool, final_recommendations_tool]
