@@ -36,7 +36,12 @@ Unlike generic chatbots, MasterMatch combines a specialized vector database of u
 
 ## Architecture
 
+MasterMatch follows a **Client-Server** architecture. The frontend (Streamlit) handles user interaction, while the backend (FastAPI) manages authentication and the AI reasoning loop.
+
+For a deep dive into our system design, data flow diagrams, and technical decisions, please see our **[Architecture Documentation](docs/ARCHITECTURE.md)**.
+
 ## Installation & Setup
+
 ### Prerequisites
 - Python 3.10 or higher
 - A MongoDB Atlas Cluster (with Vector Search enabled)
@@ -50,24 +55,39 @@ cd MasterMatch
 ```
 2. Install dependencies:
 ```bash
-pip install -r requirements.txt ?????
+pip install -r requirements.txt
 ```
 3. Set up environment variables:
 
 Create a `.env` file in the root directory and add the following keys (replace with your own credentials):
 
+3. **Set up environment variables:**
+
+   First, generate a secure secret key for authentication by running this command in your terminal:
+   ```bash
+   python -c "import secrets; print(secrets.token_hex(32))"
 
 **Required environment variables:**
 ```
+# Security
+JWT_SECRET=paste_your_generated_hex_string_here
+
+# Google Gemini
 GOOGLE_API_KEY=your_google_key_here
+
+# Langfuse (Observability)
 LANGFUSE_SECRET_KEY=your_langfuse_secret
 LANGFUSE_PUBLIC_KEY=your_langfuse_public
-LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_BASE_URL=[https://cloud.langfuse.com](https://cloud.langfuse.com)
 LANGFUSE_TRACING_ENABLED=true
 LANGFUSE_TRACING_ENVIRONMENT=dev
+
+# Database
 MONGO_URI=your_mongodb_uri
 MONGO_DB=Capstone_Project
-BACKEND_BASE_URL=http://127.0.0.1:8000
+
+# App Configuration
+BACKEND_BASE_URL=[http://127.0.0.1:8000](http://127.0.0.1:8000)
 ```
 
 4. Run the application:
@@ -85,13 +105,13 @@ uv run streamlit run app.py
 
 **Register/Login:** Create an account to start a session.
 
+![Capa](Project/extras/photos/Register.jpeg)
+
 **Complete Profile**: Navigate to the Profile tab. You can either fill in the questionnaire manually or upload your CV (PDF) for automatic extraction.
 
 **Chat:** Go to the Chat tab and ask questions like "Find me a Marketing Maste.
 
 **Visualize:** Use the Map tab to see where the recommended universities are located.
-
-*Add screenshots or GIFs here to visually demonstrate your application's key features*
 
 ## Deployment
 
@@ -102,12 +122,12 @@ uv run streamlit run app.py
 Instructions for deploying your own instance (if applicable).
 
 ## Project Structure
-
 ```
 Project/
 ├── ai/    
 │    ├── ai_client.py            # Gemini Client Wrapper
-│    └── models.ipynb            # Model experiments
+│    ├── models.ipynb
+│    └── prompts                 # AI prompts
 ├── backend/
 │     └── main.py                # FastAPI Backend Entry Point
 ├── extras/
@@ -132,9 +152,6 @@ Project/
 ├── .env.example                 # Template for environment variables
 └── README.md                    # This file
 ```
-
-**Note:** Component-level READMEs (e.g., `services/README.md`, `tools/README.md`) are recommended if those components need detailed explanation.
-
 ## Team
 
 - Duarte Fernandes — Team Lead & Backend Developer

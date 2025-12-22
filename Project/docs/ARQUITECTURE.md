@@ -1,87 +1,86 @@
-# MasterMatch Architecture & Technical Decisions
+# MasterMatch Architecture & Technical Specification
 
-This document explains how the MasterMatch application is built, how the code is organized, and why we made specific technical choices.
+## 1. High-Level Overview
 
-## 1. High-Level Architecture
+MasterMatch is designed as a **Client-Server** application that leverages **Retrieval-Augmented Generation (RAG)** to provide accurate, data-driven academic advice. The system decouples the user interface from the business logic, ensuring scalability and maintainability.
 
-MasterMatch follows a **Client-Server Architecture**. This means the application is split into two independent parts:
-1.  **The Client (Frontend):** The visual interface the user interacts with.
-2.  **The Server (Backend):** The logic that runs in the background, handling data and AI.
+The core philosophy is **"Context-Aware AI"**: effectively injecting user data (CV, budget, preferences) into the LLM's context window to minimize generic responses and maximize personalization.
 
-This separation ensures the code is clean, organized, and scalable.
+## 2. System Architecture Diagram
 
-## 2. System Layers
+![System Architecture Diagram](Architecture.png)
+*Figure 1: High-level data flow of the MasterMatch application.*
 
-The system is divided into four distinct layers, each with a specific job:
+## 3. System Layers
+
+The application is structured into four distinct layers to enforce separation of concerns:
 
 ### **A. Presentation Layer (Frontend)**
 * **Technology:** Streamlit (`app.py`)
-* **What it does:** This is the "Face" of the application. It captures what the user types, handles the login screen, and displays the chat messages and university cards.
-* **Role:** It does not make decisions; it simply displays data sent by the backend.
+* **Responsibility:** Handles user interaction, state management (session history), and visual rendering of data (maps, cards, chat bubbles).
+* **Communication:** Interacts with the backend exclusively via REST API calls.
 
 ### **B. Service Layer (Backend)**
 * **Technology:** FastAPI (`backend/main.py`)
-* **What it does:** This is the "Traffic Controller". It receives messages from the frontend and decides what to do with them.
-* **Role:** It manages user security (checking passwords) and prepares the data before sending it to the AI.
+* **Responsibility:** Acts as the orchestrator. It handles authentication, validates requests, manages sessions, and routes data between the Database and the AI Agent.
+* **Security:** Implements JWT (JSON Web Token) authentication to secure endpoints.
 
 ### **C. Intelligence Layer (AI)**
-* **Technology:** Google Gemini 1.5 Flash (`ai_client.py`)
-* **What it does:** This is the "Reasoning Engine". It understands the user's natural language questions.
-* **Role:** It decides *when* to search the database. For example, if a user asks for "Marketing Masters," the AI knows it needs to use a tool to look up real data.
+* **Technology:** Google Gemini 1.5 Flash (`ai_client.py`) & Langfuse
+* **Responsibility:** The reasoning engine. It interprets natural language, decides when to fetch external data (Agentic workflow), and synthesizes answers.
+* **Observability:** Langfuse traces every step of the AI's execution to monitor latency, costs, and tool usage accuracy.
 
 ### **D. Data Layer (Storage)**
-* **Technology:** MongoDB Atlas (`db_service.py`)
-* **What it does:** This is the "Long-Term Memory".
-* **Role:** It stores two types of data:
-    1.  **User Data:** Profiles, passwords, and chat history.
-    2.  **Vector Data:** Mathematical representations of university programs, allowing the AI to search by meaning (Semantic Search) rather than just keywords.
+* **Technology:** MongoDB Atlas
+* **Responsibility:** Stores persistent data (User Profiles, Chat Logs) and high-dimensional vector embeddings for the semantic search engine.
 
 ---
 
-## 3. Code Organization & Modules
+## 4. Data Models
 
-To keep the project clean, we organized the code into specific folders based on their function:
+We utilize a **Document-Oriented** database (MongoDB) to handle flexible user profiles and unstructured curriculum data.
 
-### `services/` (The Core Logic)
-This folder contains the main business logic.
-* **`auth_service.py`:** Handles everything related to users—registering new accounts, logging in, and hashing passwords for security.
-* **`db_service.py`:** The central place for database connections. All code that reads or writes to MongoDB lives here.
-* **`location_service.py`:** Converts university names into map coordinates for the "Visualize" tab.
+### 4.1. User Collection (`users`)
+Stores authentication data and the "Student Profile" used for context injection.
 
-### `tools/` (AI Actions)
-* **`agent_tools.py`:** These are the "skills" we gave the AI. This file contains the function that allows Gemini to actually search our MongoDB database for master's degrees.
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `_id` | ObjectId | Unique identifier |
+| `username` | String | Unique login handle |
+| `password_hash` | String | Bcrypt hashed password |
+| `profile` | Object | Nested object containing `gpa`, `budget`, `city`, `interests` |
+| `cv_text` | String | Extracted text from uploaded PDF CVs |
 
-### `utils/` (Helpers)
-* **`observability.py`:** Sets up **Langfuse**. This helps us track and debug the AI's "thought process" in real-time.
-* **`config.py`:** Loads sensitive passwords (API Keys) securely from the environment file so they aren't hardcoded.
+### 4.2. Masters Collection (`masters_portugal`)
+This collection supports **Vector Search** via the `embedding` field.
 
----
-
-## 4. Key Technical Decisions & Justifications
-
-### 1. Retrieval-Augmented Generation (RAG)
-**Decision:** We connected the AI to a database of real master's programs.
-* **Why?** A standard AI (like ChatGPT) hallucinates facts. It doesn't know the specific tuition fees or locations of Portuguese universities. By retrieving real data from MongoDB and feeding it to the AI, we ensure the answers are factual and accurate.
-
-### 2. Dynamic Context Injection
-**Decision:** We automatically insert the user's profile into every chat message hidden from view.
-* **Why?** If a student with a 5000€ budget asks "What should I study?", a generic AI gives generic advice. Our system injects "User Budget: 5000€" into the prompt *before* the AI sees it. This forces the AI to give personalized advice without the user having to repeat themselves.
-
-### 3. Separation of Frontend and Backend
-**Decision:** We didn't write everything in one big Streamlit file. We built a separate API.
-* **Why?** This is a professional standard. It keeps the user interface snappy because the heavy processing happens on the server. It also allows us to easily swap the frontend later (e.g., for a mobile app) without rewriting the logic.
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `master` | String | Name of the Master's program |
+| `university` | String | Name of the institution |
+| `tuition` | Float | Annual cost in Euros |
+| `location` | String | City coordinates for map visualization |
+| `embedding` | Array | 768-dimensional vector generated by `text-embedding-004` |
 
 ---
 
-## 5. Data Flow: Lifecycle of a Chat Request
+## 5. Key Technical Decisions & Trade-offs
 
-Here is what happens step-by-step when a user sends a message:
+### 1. MongoDB Atlas
+* **Decision:** We chose MongoDB Atlas as our primary database.
+* **Justification:** The project requires storing highly unstructured data (CV text, varied university course descriptions). A NoSQL document model offers the flexibility to evolve the schema without migrations.
+* **Vector Search:** Atlas provides native Vector Search capabilities, allowing us to perform semantic retrieval without maintaining a separate infrastructure.
 
-1.  **User Input:** The user types "Find marketing masters" in the Streamlit app.
-2.  **API Call:** Streamlit sends this text to the FastAPI backend.
-3.  **Context Loading:** The backend looks up the user's profile (e.g., "Budget: 5000€, GPA: 15") in MongoDB.
-4.  **AI Reasoning:** The backend sends the user's text + their profile to Google Gemini.
-5.  **Tool Execution:** Gemini realizes it needs data and triggers the `search_masters` tool.
-6.  **Database Search:** The system performs a Vector Search in MongoDB to find the best matching programs.
-7.  **Final Answer:** Gemini combines the search results into a natural language response (e.g., "I found these 3 programs...").
-8.  **Display:** Streamlit shows the text and renders the program cards.
+### 2. Streamlit
+* **Decision:** Streamlit was selected for the frontend.
+* **Justification:** While React offers more customization, Streamlit allows for extremely rapid development of data-heavy components (like interactive maps and chat interfaces) entirely in Python. This reduced the "Time to Hello World" significantly for a data science-focused team.
+
+### 3. FastAPI for Backend Decoupling
+* **Decision:** We implemented a standalone API instead of a monolithic Streamlit app.
+* **Justification:** This adheres to professional software standards. It ensures the business logic is not tied to the UI thread, allows for asynchronous processing (crucial for AI latency), and enables the backend to serve other clients (e.g., a mobile app) in the future.
+
+### 4. Langfuse for Observability
+* **Decision:** Integrated Langfuse for tracing.
+* **Justification:** "Black box" AI behavior is a major risk. Langfuse allows us to inspect exactly what tools Gemini called and what context was injected, making debugging hallucinations significantly easier than relying on print statements.
+
+---
