@@ -10,6 +10,7 @@ import time
 import requests
 from datetime import datetime
 import html as html_lib
+import streamlit.components.v1 as components
 
 import streamlit as st
 from streamlit_lottie import st_lottie
@@ -90,32 +91,139 @@ def load_image_base64(path: str, mtime: float = 0.0) -> str:
         return ""
 
 
-def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, duration: int = 6):
+def play_lottie_intro(
+    json_path: str,
+    size: int = 700,                 # BIGGER
+    duration: int = 4,
+    bg_color: str = "#fcf8ec",
+    shift_x: str = "0vw",            # IMPORTANT: keep at 0 for true centering
+    scale: float = 1.0,
+):
     if st.session_state.get("intro_played", False):
         return
     st.session_state["intro_played"] = True
 
     try:
-        with open(json_path, "r") as f:
+        with open(json_path, "r", encoding="utf-8") as f:
             animation = json.load(f)
     except Exception:
         return
 
-    container = st.empty()
-    st.markdown(
-        """
-        <style>
-        .stLottie iframe { border-radius: 20px !important; overflow: hidden !important; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    bg = bg_color or "#fcf8ec"
 
-    with container:
-        st_lottie(animation, height=height, key="intro_lottie")
+    overlay = st.empty()
+    with overlay.container():
+        st.markdown(
+            f"""
+            <style>
+            html, body {{
+                height: 100% !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+                background: {bg} !important;
+            }}
+
+            [data-testid="stAppViewContainer"],
+            [data-testid="stMain"],
+            section.main,
+            [data-testid="stMainBlockContainer"],
+            [data-testid="stVerticalBlock"] {{
+                background: {bg} !important;
+            }}
+
+            header[data-testid="stHeader"],
+            footer,
+            [data-testid="stSidebar"],
+            div[data-testid="collapsedControl"] {{
+                display: none !important;
+            }}
+
+            .block-container {{
+                max-width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                min-height: 100vh !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                background: {bg} !important;
+            }}
+
+            /* FORCE the iframe area itself to be centered */
+            div[data-testid="stIFrame"] {{
+                width: 100% !important;
+                display: flex !important;
+                justify-content: center !important;
+            }}
+            div[data-testid="stIFrame"] iframe {{
+                margin: 0 auto !important;
+                display: block !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        lottie_html = f"""
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8" />
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js"></script>
+          <style>
+            html, body {{
+              margin: 0;
+              width: 100%;
+              height: 100%;
+              background: {bg};
+              overflow: hidden;
+            }}
+            #stage {{
+              position: fixed;
+              inset: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              background: {bg};
+            }}
+            #lottie {{
+              width: {size}px;
+              height: {size}px;
+              background: {bg};
+              transform: translateX({shift_x}) scale({scale});
+              transform-origin: center center;
+            }}
+          </style>
+        </head>
+        <body>
+          <div id="stage"><div id="lottie"></div></div>
+
+          <script>
+            const animationData = {json.dumps(animation)};
+            lottie.loadAnimation({{
+              container: document.getElementById("lottie"),
+              renderer: "svg",
+              loop: false,
+              autoplay: true,
+              animationData: animationData,
+              rendererSettings: {{
+                preserveAspectRatio: "xMidYMid meet",
+                clearCanvas: true
+              }}
+            }});
+          </script>
+        </body>
+        </html>
+        """
+
+        components.html(lottie_html, height=max(820, size + 120), width=None, scrolling=False)
 
     time.sleep(duration)
-    container.empty()
+    overlay.empty()
+    st.rerun()
+
 
 
 def extract_text_from_pdf(uploaded_file):
@@ -325,7 +433,7 @@ sidebar_bg_base64 = load_image_base64(SIDE_PATH, side_mtime)
 hero_base64 = load_image_base64(LOGIN_HERO_PATH, hero_mtime) or sidebar_bg_base64
 
 # ---------- Show Lottie Intro ----------
-play_lottie_intro(LOTTIE_PATH, height=300, width=300, duration=6)
+play_lottie_intro(LOTTIE_PATH, size=400, duration=4, bg_color="#fbf7eb", shift_x="0vw", scale=1.0)
 
 # ---------- Global CSS ----------
 st.markdown(
