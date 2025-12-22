@@ -27,12 +27,12 @@ from ai.ai_client import AIClient  # kept in case you want to use it later
 
 # --- Constants & Paths ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOGO_PATH = os.path.join(BASE_DIR, "mm.jpg")
+LOGO_PATH = os.path.join(BASE_DIR, "mm.png")
 LOTTIE_PATH = os.path.join(BASE_DIR, "gif.json")
 SIDE_PATH = os.path.join(BASE_DIR, "photo.jpg")
 
 # Optional: place login_hero.jpg next to app.py
-LOGIN_HERO_PATH = os.path.join(BASE_DIR, "login_hero.jpg")
+LOGIN_HERO_PATH = os.path.join(BASE_DIR,"capa.jpg")
 
 # Backend URL (use env var in deploy; defaults to local)
 BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://127.0.0.1:8000")
@@ -536,7 +536,7 @@ if not st.session_state.logged_in:
                     ">
                         <h3 style="margin:0; font-size:18px; font-weight:900;">Find the right Master’s program</h3>
                         <p style="margin:6px 0 0 0; font-size:13px;">
-                            Chat with AI • Compare tuition • Explore universities on the map
+                            Consult with AI • Compare costs • Map your future
                         </p>
                     </div>
                 </div>
