@@ -53,9 +53,9 @@ cd MasterMatch
 uv sync ?????
 ```
 3. Set up environment variables:
-```bash
+
 Create a `.env` file in the root directory and add the following keys (replace with your own credentials):
-```
+
 
 **Required environment variables:**
 ```
@@ -84,8 +84,6 @@ uv run streamlit run app.py
 ## Usage
 
 **Register/Login:** Create an account to start a session.
-
-![Login Screen](assets/Login.jpeg)
 
 **Complete Profile**: Navigate to the Profile tab. You can either fill in the questionnaire manually or upload your CV (PDF) for automatic extraction.
 
@@ -122,23 +120,8 @@ project-root/
 
 ## Team
 
-- Team Member 1 - [Role/Responsibilities]
-- Team Member 2 - [Role/Responsibilities]
-- Team Member 3 - [Role/Responsibilities]
-- Team Member 4 - [Role/Responsibilities]
-
-## License
-
-[Your chosen license - MIT, Apache, etc. - not necessary]
-
+- Duarte Fernandes — Team Lead & Backend Developer
+- Filipe Caçador — Data Engineer & Domain Research Lead
+- David Carrilho — Backend Developer
+- Duarte Oliveira — Frontend Developer
 ---
-
-## What Makes a Good README?
-
-Your README should answer:
-- **What** does this application do?
-- **Why** does it exist / what problem does it solve?
-- **How** do I run it locally?
-- **Who** built it?
-
-Keep it clear, organized, and professional. This is often the first thing evaluators and potential users will see.
