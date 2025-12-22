@@ -1,15 +1,11 @@
 # Project/services/auth_service.py
 import bcrypt
-import jwt
 import os
 from datetime import datetime, timedelta
 from bson.objectid import ObjectId
 from services.db_service import DatabaseService
 
 
-SECRET_KEY = os.getenv("JWT_SECRET", "your-super-secret-key")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 day
 
 class AuthService:
     def __init__(self):
@@ -144,9 +140,7 @@ class AuthService:
     def update_profile(self, username: str, profile_data: dict):
         """Saves the user's background/CV. This clears the 'summary' to force regeneration."""
         try:
-            # FIX: Use dot notation for keys to MERGE data instead of overwriting the whole 'profile' object.
-            # This allows us to $set specific fields (like profile.cv_documents) and $unset profile.summary
-            # in the same operation without conflict.
+            
             update_fields = {f"profile.{key}": value for key, value in profile_data.items()}
 
             self.users.update_one(
@@ -174,19 +168,4 @@ class AuthService:
         """Gets the user's background/CV."""
         user = self.users.find_one({"username": username})
         return user.get("profile", {}) if user else {}
-    
-    def create_access_token(self, data: dict):
-        to_encode = data.copy()
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        to_encode.update({"exp": expire})
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return encoded_jwt
-
-    def verify_token(self, token: str):
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            return payload.get("sub") # returns username
-        except jwt.ExpiredSignatureError:
-            return None
-        except jwt.InvalidTokenError:
-            return None
+   

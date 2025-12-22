@@ -2,8 +2,7 @@
 import sys
 import os
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,18 +15,7 @@ app = FastAPI(title="MasterMatch API", version="1.0.0")
 
 # Global instances
 auth_service = AuthService()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-# --- Security Dependency ---
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    username = auth_service.verify_token(token)
-    if not username:
-        raise HTTPException(
-            status_code=401, 
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return username
 
 # --- Pydantic Models ---
 class ChatRequest(BaseModel):
@@ -40,22 +28,12 @@ class ChatResponse(BaseModel):
     response: str
     data: Optional[List[Dict[str, Any]]] = None 
 
-# ✅ ADDED: Missing LoginRequest Model
-class LoginRequest(BaseModel):
-    username: str
-    password: str
 
 # --- Endpoints ---
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(
-    request: ChatRequest, 
-    current_user: str = Depends(get_current_user)
-):
+async def chat_endpoint(request: ChatRequest):
     try:
-        if current_user != request.username:
-            raise HTTPException(status_code=403, detail="Forbidden: You cannot act as another user")
-
         # 1. Get User Profile Data
         user_profile = auth_service.get_profile(request.username)
         
@@ -120,21 +98,6 @@ async def chat_endpoint(
         print(f"❌ API Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/login")
-def login(creds: LoginRequest):
-    # This keeps the logic on the server side
-    user = auth_service.login_user(creds.username, creds.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    token = auth_service.create_access_token({"sub": user["username"]})
-    
-    return {
-        "token": token, 
-        "name": user.get("name"), 
-        "username": user.get("username")
-    }
-
 @app.get("/history/{thread_id}")
-def get_history(thread_id: str, current_user: str = Depends(get_current_user)):
+def get_history(thread_id: str):
     return auth_service.load_thread_messages(thread_id)
