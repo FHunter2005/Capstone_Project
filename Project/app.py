@@ -120,13 +120,37 @@ def play_lottie_intro(json_path: str, height: int = 300, width: int = 300, durat
 
 
 def extract_text_from_pdf(uploaded_file):
+    """
+    Robustly extracts text from an uploaded PDF.
+    Handles encryption, empty files, and provides user feedback.
+    """
     try:
         reader = pypdf.PdfReader(uploaded_file)
+        
+        # Check if the file is password protected
+        if reader.is_encrypted:
+            st.error("🔒 This PDF is encrypted. Please upload an unprotected file.")
+            return None
+            
         text = ""
         for page in reader.pages:
-            text += (page.extract_text() or "") + "\n"
-        return text.strip()
-    except Exception:
+            # Extract text and handle potential None returns from pypdf
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        
+        extracted = text.strip()
+        
+        # Check if the extraction resulted in an empty string (likely a scan)
+        if not extracted:
+            st.warning("⚠️ No text found. Your PDF might be an image or a scan. Please upload a text-based PDF.")
+            return None
+            
+        return extracted
+        
+    except Exception as e:
+        # Provide the actual error message for easier debugging
+        st.error(f"❌ Error reading PDF: {str(e)}")
         return None
 
 
