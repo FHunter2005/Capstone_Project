@@ -6,12 +6,12 @@
 
 MasterMatch is an AI-powered application designed to streamline the search for Master's degree programs. By leveraging **Retrieval-Augmented Generation (RAG)**, it connects students with factual, data-driven academic advice.
 
-Unlike generic chatbots, MasterMatch combines a specialized vector database of university programs with personal user context. Users can upload their CVs, and the system uses this data—along with background, preference city, and budget—to provide highly personalized recommendations, tuition estimates, and location visualization.
+Unlike generic chatbots, MasterMatch combines a specialized vector database of university programs with personal user context. Users can upload their CVs, and the system uses this data along with background, preference city, and budget to provide highly personalized recommendations, tuition estimates, and location visualization.
 
 ## Features
 
 - **AI Academic Advisor:** A conversational agent powered by **Google Gemini** that provides factual answers about programs, curriculum, and requirements.
-- **Smart CV Analysis:** Users can upload a PDF CV; the system extracts the text to tailor recommendations based on professional experience and academic background.
+- **CV Analysis:** Users can upload a PDF CV; the system extracts the text to tailor recommendations based on professional experience and academic background.
 - **Vector Search (RAG):** Utilizes **MongoDB Atlas Vector Search** to semantically match user queries with real program data, reducing hallucinations.
 - **University Map:** Interactive map visualization showing the exact locations of universities using Google Maps data.
 - **Student Budget Calculator:** A built-in tool to help users estimate the total cost of their education.
@@ -50,7 +50,7 @@ cd MasterMatch
 ```
 2. Install dependencies:
 ```bash
-uv sync ?????
+pip install -r requirements.txt ?????
 ```
 3. Set up environment variables:
 
@@ -87,7 +87,7 @@ uv run streamlit run app.py
 
 **Complete Profile**: Navigate to the Profile tab. You can either fill in the questionnaire manually or upload your CV (PDF) for automatic extraction.
 
-**Chat:** Go to the Chat tab and ask questions like "Find me a Marketing Master in Lisbon under 5000€".
+**Chat:** Go to the Chat tab and ask questions like "Find me a Marketing Maste.
 
 **Visualize:** Use the Map tab to see where the recommended universities are located.
 
@@ -95,7 +95,7 @@ uv run streamlit run app.py
 
 ## Deployment
 
-**Live Application:** [Your deployed URL]
+**Live Application:** [\[GitHub Repository\]](https://github.com/FHunter2005/Capstone_Project.git)
 
 **Deployment Platform:** [Streamlit Cloud / Render / Vercel / etc.]
 
@@ -104,16 +104,33 @@ Instructions for deploying your own instance (if applicable).
 ## Project Structure
 
 ```
-project-root/
-├── app.py                 # Main application entry point
-├── services/              # Business logic layer
-├── tools/                 # Function calling tools
-├── utils/                 # Utility functions
+Project/
+├── ai/    
+│    ├── ai_client.py            # Gemini Client Wrapper
+│    └── models.ipynb            # Model experiments
+├── backend/
+│     └── main.py                # FastAPI Backend Entry Point
+├── extras/
+│     ├── data/
+│     └── photos/
+├── services/
+│     ├── auth_service.py        # User Management & Auth
+│     ├── db_service.py          # MongoDB Connection
+│     └── location_service.py    # Maps Logic
+├── tools/                       # Utility functions
+│     └── agent_tools.py         # AI Function Calling Tools
+├── utils/
+│     ├── config.py              # Config loader
+│     ├── observability.py       # Langfuse setup
+│     └── web_scrapping.ipynb
 ├── docs/
-│   └── ARCHITECTURE.md    # Architecture decisions and explanations
-├── requirements.txt       # Dependencies
-├── .env.example          # Environment variable template
-└── README.md             # This file
+│   └── ARCHITECTURE.md          # Architecture decisions and diagrams Team
+├── app.py                       # Streamlit Frontend Entry Point
+├── calculator.py                # Budget Calculator Logic
+├── map_tab.py                   # Map Visualization Logic
+├── requirements.txt             # Project Dependencies
+├── .env.example                 # Template for environment variables
+└── README.md                    # This file
 ```
 
 **Note:** Component-level READMEs (e.g., `services/README.md`, `tools/README.md`) are recommended if those components need detailed explanation.
